@@ -1,4 +1,4 @@
-use axum::{Json, extract::Path, http::StatusCode};
+use axum::{extract::Path, http::StatusCode, Json};
 use crate::models::{Device, PaymentRequest, PaymentResponse, Session};
 use crate::services;
 
@@ -24,7 +24,7 @@ pub async fn process_payment(
     // TODO: Call Soroban smart contract to validate payment
     // For now, simulate successful payment
     let session = Session::new(payment.device_id, payment.user_address);
-    
+
     Ok(Json(PaymentResponse {
         access_granted: true,
         session_id: session.id,
@@ -33,10 +33,9 @@ pub async fn process_payment(
 }
 
 /// Get session details
-pub async fn get_session(
-    Path(id): Path<String>,
-) -> Result<Json<Session>, StatusCode> {
+pub async fn get_session(Path(id): Path<String>) -> Result<Json<Session>, StatusCode> {
     // TODO: Implement session storage
     // For now, return mock session
+    let _ = id;
     Err(StatusCode::NOT_IMPLEMENTED)
 }
