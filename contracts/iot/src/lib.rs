@@ -11,6 +11,12 @@ const CREDIT_TTL_LEDGERS: u32 = 518_400;
 #[cfg(test)]
 const CREDIT_TTL_LEDGERS: u32 = 100;
 
+/// Timelock before unpause takes effect (~1 hour at 5 s/ledger). Short in tests.
+#[cfg(not(test))]
+const UNPAUSE_DELAY_LEDGERS: u32 = 720;
+#[cfg(test)]
+const UNPAUSE_DELAY_LEDGERS: u32 = 5;
+
 // ── Discount tiers (device count thresholds) ─────────────────────────────────
 // ≥10 devices → 5 % off, ≥50 → 10 % off, ≥100 → 20 % off
 const TIER2_MIN: usize = 10;
@@ -44,6 +50,10 @@ pub enum DataKey {
     DeviceOwner(Symbol),
     /// Prepaid credits: (user, device_id) → Credit
     Credit(Address, Symbol),
+    /// true when contract is paused
+    Paused,
+    /// ledger sequence at which unpause was scheduled
+    UnpauseAt,
 }
 
 #[contract]
@@ -118,6 +128,60 @@ impl IotContract {
             .get(&DataKey::DeviceOwner(device_id))
     }
 
+    // ── Emergency pause ──────────────────────────────────────────────────────
+
+    /// Pause the contract immediately. Admin only. Emits a Paused event.
+    pub fn pause(env: Env, admin: Address) {
+        Self::require_admin(env.clone(), admin.clone());
+        env.storage().instance().set(&DataKey::Paused, &true);
+        // Clear any pending unpause schedule.
+        env.storage().instance().remove(&DataKey::UnpauseAt);
+        env.events()
+            .publish((symbol_short!("paused"),), (admin, env.ledger().sequence()));
+    }
+
+    /// Schedule an unpause after UNPAUSE_DELAY_LEDGERS. Admin only.
+    /// The contract stays paused until `execute_unpause` is called after the delay.
+    pub fn unpause(env: Env, admin: Address) {
+        Self::require_admin(env.clone(), admin.clone());
+        if !Self::is_paused(env.clone()) {
+            panic!("not paused");
+        }
+        let ready_at = env.ledger().sequence() + UNPAUSE_DELAY_LEDGERS;
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseAt, &ready_at);
+        env.events().publish(
+            (symbol_short!("upauseSch"),),
+            (admin, ready_at),
+        );
+    }
+
+    /// Execute the unpause after the timelock has elapsed.
+    pub fn execute_unpause(env: Env, admin: Address) {
+        Self::require_admin(env.clone(), admin.clone());
+        let ready_at: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UnpauseAt)
+            .unwrap_or_else(|| panic!("unpause not scheduled"));
+        if env.ledger().sequence() < ready_at {
+            panic!("timelock not elapsed");
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().remove(&DataKey::UnpauseAt);
+        env.events()
+            .publish((symbol_short!("unpaused"),), (admin, env.ledger().sequence()));
+    }
+
+    /// Returns true when the contract is paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     // ── Bulk access ──────────────────────────────────────────────────────────
 
     /// Purchase bulk access credits for multiple devices in one transaction.
@@ -131,6 +195,10 @@ impl IotContract {
         amounts: Vec<i128>,
     ) {
         user.require_auth();
+
+        if Self::is_paused(env.clone()) {
+            panic!("contract paused");
+        }
 
         let n = device_ids.len() as usize;
         if n == 0 {
@@ -234,6 +302,10 @@ impl IotContract {
         amount: i128,
     ) -> bool {
         user.require_auth();
+
+        if Self::is_paused(env.clone()) {
+            panic!("contract paused");
+        }
 
         let price = Self::get_device_price(env.clone(), device_id.clone());
         if price <= 0 {

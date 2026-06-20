@@ -605,3 +605,122 @@ fn test_bulk_length_mismatch_panics() {
     let amts: soroban_sdk::Vec<i128> = soroban_sdk::Vec::new(&env);
     c.purchase_bulk_access(&user, &token_id, &ids, &amts);
 }
+
+// ── emergency pause ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_pause_blocks_request_access() {
+    let (env, cid, token_id, admin) = setup();
+    let c = IotContractClient::new(&env, &cid);
+    let owner = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    c.init_device(&symbol_short!("d1"), &1_000, &owner);
+    token::StellarAssetClient::new(&env, &token_id).mint(&user, &1_000);
+
+    c.pause(&admin);
+    assert!(c.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "contract paused")]
+fn test_request_access_panics_when_paused() {
+    let (env, cid, token_id, admin) = setup();
+    let c = IotContractClient::new(&env, &cid);
+    let owner = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    c.init_device(&symbol_short!("d1"), &1_000, &owner);
+    token::StellarAssetClient::new(&env, &token_id).mint(&user, &1_000);
+
+    c.pause(&admin);
+    c.request_access(&symbol_short!("d1"), &user, &token_id, &1_000);
+}
+
+#[test]
+#[should_panic(expected = "contract paused")]
+fn test_purchase_bulk_access_panics_when_paused() {
+    let (env, cid, token_id, admin) = setup_with_fee(0);
+    let c = IotContractClient::new(&env, &cid);
+    let owner = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    c.init_device(&Symbol::new(&env, "dev1"), &500, &owner);
+    token::StellarAssetClient::new(&env, &token_id).mint(&user, &500);
+
+    c.pause(&admin);
+    let (ids, amts) = make_bulk(&env, &[("dev1", 500)]);
+    c.purchase_bulk_access(&user, &token_id, &ids, &amts);
+}
+
+#[test]
+fn test_read_only_functions_work_when_paused() {
+    let (env, cid, token_id, admin) = setup();
+    let c = IotContractClient::new(&env, &cid);
+    let owner = Address::generate(&env);
+    c.init_device(&symbol_short!("d1"), &1_000, &owner);
+
+    c.pause(&admin);
+
+    // All reads must succeed.
+    assert!(c.is_paused());
+    assert_eq!(c.get_platform_fee(), 500);
+    assert_eq!(c.get_platform_fee_balance(&token_id), 0);
+    assert_eq!(c.get_device_price(&symbol_short!("d1")), 1_000);
+    assert_eq!(c.get_device_owner(&symbol_short!("d1")).unwrap(), owner);
+}
+
+#[test]
+#[should_panic(expected = "admin required")]
+fn test_pause_non_admin_panics() {
+    let (env, cid, _, _) = setup();
+    IotContractClient::new(&env, &cid).pause(&Address::generate(&env));
+}
+
+#[test]
+#[should_panic(expected = "not paused")]
+fn test_unpause_when_not_paused_panics() {
+    let (env, cid, _, admin) = setup();
+    IotContractClient::new(&env, &cid).unpause(&admin);
+}
+
+#[test]
+#[should_panic(expected = "timelock not elapsed")]
+fn test_execute_unpause_before_delay_panics() {
+    let (env, cid, _, admin) = setup();
+    let c = IotContractClient::new(&env, &cid);
+    c.pause(&admin);
+    c.unpause(&admin); // schedules at current_ledger + 5
+    // Try to execute immediately (delay = 5 ledgers in test builds).
+    c.execute_unpause(&admin);
+}
+
+#[test]
+fn test_unpause_after_timelock_succeeds() {
+    let (env, cid, token_id, admin) = setup();
+    let c = IotContractClient::new(&env, &cid);
+    let owner = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    c.init_device(&symbol_short!("d1"), &1_000, &owner);
+    token::StellarAssetClient::new(&env, &token_id).mint(&user, &1_000);
+
+    c.pause(&admin);
+    assert!(c.is_paused());
+
+    c.unpause(&admin); // schedule
+    // Advance ledger past the 5-ledger test delay (stays within instance TTL).
+    env.ledger().set_sequence_number(env.ledger().sequence() + 5);
+    c.execute_unpause(&admin);
+
+    assert!(!c.is_paused());
+    // Payments work again.
+    assert!(c.request_access(&symbol_short!("d1"), &user, &token_id, &1_000));
+}
+
+#[test]
+#[should_panic(expected = "unpause not scheduled")]
+fn test_execute_unpause_without_schedule_panics() {
+    let (env, cid, _, admin) = setup();
+    IotContractClient::new(&env, &cid).execute_unpause(&admin);
+}
