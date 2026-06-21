@@ -1,0 +1,161 @@
+name: CI / CD
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend lint and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm install --workspaces=false --no-package-lock
+
+      - name: Lint frontend
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Test frontend
+        working-directory: apps/web
+        run: npm test
+
+  backend:
+    name: Rust backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/api
+
+      - name: Test backend
+        working-directory: apps/api
+        run: cargo test
+
+  contracts:
+    name: Soroban contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/iot
+
+      - name: Test contracts
+        working-directory: contracts/iot
+        run: cargo test
+
+  deploy-frontend:
+    name: Deploy frontend to Vercel
+    runs-on: ubuntu-latest
+    needs:
+      - frontend
+      - backend
+      - contracts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm install --workspaces=false --no-package-lock
+
+      - name: Build frontend
+        working-directory: apps/web
+        run: npm run build
+
+      - name: Trigger Vercel deployment
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK_URL" ]; then
+            echo "VERCEL_DEPLOY_HOOK_URL secret is not configured."
+            exit 1
+          fi
+
+          curl -fsS -X POST "$VERCEL_DEPLOY_HOOK_URL"
+
+  deploy-contracts:
+    name: Deploy contracts to Stellar testnet
+    runs-on: ubuntu-latest
+    needs:
+      - frontend
+      - backend
+      - contracts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/iot
+
+      - name: Add Wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --version 27.0.0
+
+      - name: Build and optimize contract
+        working-directory: contracts/iot
+        run: |
+          cargo build --target wasm32-unknown-unknown --release
+          stellar contract optimize --wasm target/wasm32-unknown-unknown/release/iot_contract.wasm
+
+      - name: Deploy contract to testnet
+        working-directory: contracts/iot
+        run: |
+          if [ -z "$STELLAR_SECRET_KEY" ]; then
+            echo "STELLAR_SECRET_KEY secret is not configured."
+            exit 1
+          fi
+
+          stellar contract deploy \
+            --wasm target/wasm32-unknown-unknown/release/iot_contract.optimized.wasm \
+            --network testnet \
+            --source-account "$STELLAR_SECRET_KEY"

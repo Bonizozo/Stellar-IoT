@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import PayButton from '@/components/PayButton'
 import { getDevices } from '@/services/api'
@@ -10,22 +10,29 @@ export default function DevicePage() {
   const params = useParams()
   const [device, setDevice] = useState<Device | null>(null)
   const [loading, setLoading] = useState(true)
+  const deviceId = Array.isArray(params.id) ? params.id[0] : params.id
 
-  useEffect(() => {
-    loadDevice()
-  }, [params.id])
+  const loadDevice = useCallback(async () => {
+    if (!deviceId) {
+      setDevice(null)
+      setLoading(false)
+      return
+    }
 
-  const loadDevice = async () => {
     try {
       const devices = await getDevices()
-      const found = devices.find((d) => d.id === params.id)
+      const found = devices.find((d) => d.id === deviceId)
       setDevice(found || null)
     } catch (error) {
       console.error('Failed to load device:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [deviceId])
+
+  useEffect(() => {
+    loadDevice()
+  }, [loadDevice])
 
   if (loading) return <div className="container mx-auto px-4 py-8">Loading...</div>
   if (!device) return <div className="container mx-auto px-4 py-8">Device not found</div>

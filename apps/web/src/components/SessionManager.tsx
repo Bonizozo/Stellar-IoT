@@ -8,19 +8,19 @@ import { getSessions, extendSession, endSession } from '@/services/api'
 const USER_ADDRESS = 'GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 
 function useCountdown(expiresAt: string): string {
-  const calc = () => {
+  const calc = useCallback(() => {
     const diff = new Date(expiresAt).getTime() - Date.now()
     if (diff <= 0) return '00:00:00'
     const h = Math.floor(diff / 3_600_000)
     const m = Math.floor((diff % 3_600_000) / 60_000)
     const s = Math.floor((diff % 60_000) / 1_000)
     return [h, m, s].map(n => String(n).padStart(2, '0')).join(':')
-  }
+  }, [expiresAt])
   const [time, setTime] = useState(calc)
   useEffect(() => {
     const id = setInterval(() => setTime(calc), 1_000)
     return () => clearInterval(id)
-  }, [expiresAt])
+  }, [calc])
   return time
 }
 
