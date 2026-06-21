@@ -90,6 +90,24 @@ Each component can run independently:
 - **Backend**: `cd apps/api && cargo test`
 - **Contracts**: `cd contracts/iot && cargo test`
 
+## CI/CD
+
+GitHub Actions now runs the following on every pull request:
+
+- Frontend lint and tests
+- Rust backend tests
+- Soroban contract tests
+
+When changes land on `main`, the workflow also:
+
+- Builds the frontend and triggers a Vercel deployment
+- Builds, optimizes, and deploys the Soroban contract to Stellar testnet
+
+Required repository secrets:
+
+- `VERCEL_DEPLOY_HOOK_URL`
+- `STELLAR_SECRET_KEY`
+
 ## How It Works
 
 1. User browses available IoT devices on the frontend

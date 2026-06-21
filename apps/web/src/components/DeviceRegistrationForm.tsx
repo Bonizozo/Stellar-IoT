@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { DeviceRegistrationForm as FormData, DeviceCategory, ConnectivityType } from '@/types'
 import { registerDevice } from '@/services/api'
+import { validateDeviceRegistration } from '@/lib/deviceRegistration'
 
 const CATEGORIES: DeviceCategory[] = ['sensor', 'camera', 'actuator', 'gateway', 'tracker', 'other']
 const CONNECTIVITY: ConnectivityType[] = ['wifi', 'lora', 'zigbee', 'bluetooth', '4g', 'ethernet']
@@ -21,13 +22,7 @@ export default function DeviceRegistrationForm() {
   const [apiError, setApiError] = useState<string | null>(null)
 
   const validate = (): boolean => {
-    const e: typeof errors = {}
-    if (!form.name.trim()) e.name = 'Device name is required'
-    if (!form.description.trim()) e.description = 'Description is required'
-    if (form.price <= 0) e.price = 'Price must be greater than 0'
-    if (!form.location.trim()) e.location = 'Location is required'
-    if (!form.owner_address.trim()) e.owner_address = 'Owner address is required'
-    else if (!/^G[A-Z2-7]{55}$/.test(form.owner_address)) e.owner_address = 'Invalid Stellar address'
+    const e = validateDeviceRegistration(form)
     setErrors(e)
     return Object.keys(e).length === 0
   }

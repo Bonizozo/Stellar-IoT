@@ -25,7 +25,7 @@ echo ""
 echo "Testing frontend..."
 cd apps/web
 if [ -f "package.json" ] && grep -q "\"test\"" package.json; then
-  npm test -- --run
+  npm test
 else
   echo "⚠️  No frontend tests configured yet"
 fi
