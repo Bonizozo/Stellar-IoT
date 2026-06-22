@@ -4,11 +4,13 @@ use crate::models::{
     PaymentRequest, PaymentResponse, Session,
 };
 use crate::services;
+use crate::webhook::WebhookEventType;
+use crate::webhook_service::{dispatch_event, WebhookStore};
 use axum::{
-    extract::{Path, Query, ws::{WebSocketUpgrade, WebSocket, Message}},
-    http::StatusCode,
-    response::IntoResponse,
-    extract::{Path, Query},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, Query, State,
+    },
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -16,6 +18,7 @@ use axum::{
 use serde::Deserialize;
 
 /// Get all available devices (unchanged — keeps backwards compatibility).
+#[allow(dead_code)]
 pub async fn get_devices() -> Json<Vec<Device>> {
     Json(services::get_mock_devices())
 }
@@ -26,28 +29,49 @@ pub async fn search_devices(Query(query): Query<DeviceSearchQuery>) -> Json<Devi
 }
 
 /// Process payment and grant access with Stellar verification.
+/// On success, fires `payment_received` and `access_granted` webhook events.
 pub async fn process_payment(
+    State(store): State<WebhookStore>,
     Json(payment): Json<PaymentRequest>,
 ) -> Result<Json<PaymentResponse>, StatusCode> {
-    // 1. Verify payment on Stellar
     match services::verify_payment(&payment.tx_hash, &payment.device_id, &payment.user_address)
         .await
     {
         Ok(true) => {
-            // Payment verified - grant access and store session in global store
-            let session = services::create_session(payment.device_id, payment.user_address);
+            let session = services::create_session(payment.device_id.clone(), payment.user_address.clone());
+
+            // Fire payment_received event
+            tokio::spawn(dispatch_event(
+                store.clone(),
+                payment.device_id.clone(),
+                WebhookEventType::PaymentReceived,
+                serde_json::json!({
+                    "tx_hash": payment.tx_hash,
+                    "user_address": payment.user_address,
+                    "amount": payment.amount,
+                }),
+            ));
+
+            // Fire access_granted event
+            tokio::spawn(dispatch_event(
+                store.clone(),
+                payment.device_id.clone(),
+                WebhookEventType::AccessGranted,
+                serde_json::json!({
+                    "session_id": session.id,
+                    "user_address": session.user_address,
+                    "expires_at": session.expires_at.to_rfc3339(),
+                }),
+            ));
+
             Ok(Json(PaymentResponse {
                 access_granted: true,
                 session_id: session.id,
                 expires_at: session.expires_at.to_rfc3339(),
             }))
         }
-        Ok(false) => {
-            // Replay attack detected
-            Err(StatusCode::CONFLICT)
-        }
+        Ok(false) => Err(StatusCode::CONFLICT),
         Err(msg) => {
-            // Verification failed
             eprintln!("Payment verification failed: {}", msg);
             Err(StatusCode::BAD_REQUEST)
         }
@@ -113,7 +137,6 @@ pub async fn telemetry_ws(
 
 /// Send live telemetry data packets to the client.
 async fn handle_telemetry_socket(mut socket: WebSocket, session_id: String) {
-    // Verify session exists
     let session = match services::get_session(&session_id) {
         Some(s) => s,
         None => {
@@ -122,7 +145,6 @@ async fn handle_telemetry_socket(mut socket: WebSocket, session_id: String) {
         }
     };
 
-    // Find the device category for simulation behavior
     let device_category = services::get_mock_devices()
         .into_iter()
         .find(|d| d.id == session.device_id)
@@ -135,7 +157,6 @@ async fn handle_telemetry_socket(mut socket: WebSocket, session_id: String) {
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                // Check if session remains active and not expired
                 let current_session = match services::get_session(&session_id) {
                     Some(s) => s,
                     None => break,
@@ -154,7 +175,7 @@ async fn handle_telemetry_socket(mut socket: WebSocket, session_id: String) {
                 let data = services::generate_telemetry_data(&device_category, ticks);
                 if let Ok(msg_text) = serde_json::to_string(&data) {
                     if socket.send(Message::Text(msg_text)).await.is_err() {
-                        break; // Connection dropped
+                        break;
                     }
                 } else {
                     break;
@@ -171,14 +192,6 @@ async fn handle_telemetry_socket(mut socket: WebSocket, session_id: String) {
 }
 
 /// `GET /devices/:id/analytics`
-///
-/// Query params:
-/// - `period`   – daily | weekly | monthly  (default: daily)
-/// - `lookback` – number of periods to include (default: 30/12/12)
-/// - `format`   – json | csv  (default: json)
-///
-/// Returns a full analytics report for the device owner.
-/// Use `format=csv` for an exportable spreadsheet.
 pub async fn get_device_analytics(
     Path(id): Path<String>,
     Query(query): Query<AnalyticsQuery>,
@@ -202,14 +215,8 @@ pub async fn get_device_analytics(
             Ok(csv) => (
                 StatusCode::OK,
                 [
-                    (
-                        header::CONTENT_TYPE,
-                        "text/csv; charset=utf-8",
-                    ),
-                    (
-                        header::CONTENT_DISPOSITION,
-                        "attachment; filename=\"analytics.csv\"",
-                    ),
+                    (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+                    (header::CONTENT_DISPOSITION, "attachment; filename=\"analytics.csv\""),
                 ],
                 csv,
             )
