@@ -1,5 +1,8 @@
-use axum::{Router, routing::{get, post}};
 use crate::handlers;
+use axum::{
+    routing::{get, post},
+    Router,
+};
 
 pub fn device_routes() -> Router {
     Router::new()
@@ -9,6 +12,5 @@ pub fn device_routes() -> Router {
 }
 
 pub fn payment_routes() -> Router {
-    Router::new()
-        .route("/pay", post(handlers::process_payment))
+    Router::new().route("/pay", post(handlers::process_payment))
 }

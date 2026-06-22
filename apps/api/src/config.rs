@@ -4,6 +4,7 @@ use std::env;
 #[derive(Clone)]
 pub struct StellarConfig {
     pub horizon_url: String,
+    #[allow(dead_code)]
     pub network_passphrase: String,
 }
 
@@ -15,6 +16,9 @@ impl StellarConfig {
         let network_passphrase = env::var("STELLAR_NETWORK_PASSPHRASE")
             .unwrap_or_else(|_| "Test SDF Network ; September 2015".to_string());
 
-        Self { horizon_url, network_passphrase }
+        Self {
+            horizon_url,
+            network_passphrase,
+        }
     }
 }

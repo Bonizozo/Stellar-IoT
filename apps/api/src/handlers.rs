@@ -1,6 +1,12 @@
-use axum::{Json, extract::{Path, Query}, http::StatusCode};
-use crate::models::{Device, DeviceSearchQuery, DeviceSearchResponse, PaymentRequest, PaymentResponse, Session};
+use crate::models::{
+    Device, DeviceSearchQuery, DeviceSearchResponse, PaymentRequest, PaymentResponse, Session,
+};
 use crate::services;
+use axum::{
+    extract::{Path, Query},
+    http::StatusCode,
+    Json,
+};
 
 /// Get all available devices (unchanged — keeps backwards compatibility).
 pub async fn get_devices() -> Json<Vec<Device>> {
@@ -20,9 +26,7 @@ pub async fn get_devices() -> Json<Vec<Device>> {
 /// - `sort_order` – asc | desc  (default: asc)
 /// - `limit`      – page size 1–100 (default: 20)
 /// - `cursor`     – opaque cursor from previous page's `next_cursor`
-pub async fn search_devices(
-    Query(query): Query<DeviceSearchQuery>,
-) -> Json<DeviceSearchResponse> {
+pub async fn search_devices(Query(query): Query<DeviceSearchQuery>) -> Json<DeviceSearchResponse> {
     Json(services::search_devices(&query))
 }
 
@@ -31,11 +35,9 @@ pub async fn process_payment(
     Json(payment): Json<PaymentRequest>,
 ) -> Result<Json<PaymentResponse>, StatusCode> {
     // 1. Verify payment on Stellar
-    match services::verify_payment(
-        &payment.tx_hash,
-        &payment.device_id,
-        &payment.user_address,
-    ).await {
+    match services::verify_payment(&payment.tx_hash, &payment.device_id, &payment.user_address)
+        .await
+    {
         Ok(true) => {
             // Payment verified - grant access
             let session = Session::new(payment.device_id, payment.user_address);
@@ -58,9 +60,7 @@ pub async fn process_payment(
 }
 
 /// Get session details.
-pub async fn get_session(
-    Path(id): Path<String>,
-) -> Result<Json<Session>, StatusCode> {
+pub async fn get_session(Path(id): Path<String>) -> Result<Json<Session>, StatusCode> {
     // TODO: Implement persistent session storage.
     let _ = id;
     Err(StatusCode::NOT_IMPLEMENTED)
