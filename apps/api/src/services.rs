@@ -1,4 +1,13 @@
-use crate::models::{Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder};
+use crate::models::{
+    Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder,
+};
+use crate::stellar_service::StellarService;
+use lazy_static::lazy_static;
+use std::sync::Arc;
+
+lazy_static! {
+    static ref STELLAR_SERVICE: Arc<StellarService> = Arc::new(StellarService::new());
+}
 
 /// Haversine distance between two WGS-84 coordinates, returns kilometres.
 fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
@@ -193,9 +202,7 @@ pub fn search_devices(query: &DeviceSearchQuery) -> DeviceSearchResponse {
                 }
             }
             // Geospatial proximity
-            if let (Some(lat), Some(lng), Some(radius)) =
-                (query.lat, query.lng, query.radius_km)
-            {
+            if let (Some(lat), Some(lng), Some(radius)) = (query.lat, query.lng, query.radius_km) {
                 let dist = haversine_km(lat, lng, d.latitude, d.longitude);
                 if dist > radius {
                     return false;
@@ -215,7 +222,7 @@ pub fn search_devices(query: &DeviceSearchQuery) -> DeviceSearchResponse {
             filtered.sort_by(|a, b| a.rating.partial_cmp(&b.rating).unwrap());
         }
         Some(SortField::Popularity) => {
-            filtered.sort_by(|a, b| a.popularity.cmp(&b.popularity));
+            filtered.sort_by_key(|a| a.popularity);
         }
         None => {
             // Default: stable insertion order (by id lexicographic).
@@ -234,17 +241,13 @@ pub fn search_devices(query: &DeviceSearchQuery) -> DeviceSearchResponse {
         filtered
             .iter()
             .position(|d| &d.id == cursor)
-            .map(|pos| pos + 1)   // start *after* the cursor device
+            .map(|pos| pos + 1) // start *after* the cursor device
             .unwrap_or(0)
     } else {
         0
     };
 
-    let page: Vec<Device> = filtered
-        .into_iter()
-        .skip(start_index)
-        .take(limit)
-        .collect();
+    let page: Vec<Device> = filtered.into_iter().skip(start_index).take(limit).collect();
 
     let next_cursor = if start_index + page.len() < total {
         page.last().map(|d| d.id.clone())
@@ -258,6 +261,29 @@ pub fn search_devices(query: &DeviceSearchQuery) -> DeviceSearchResponse {
         next_cursor,
         data: page,
     }
+}
+
+/// Verify a payment against Stellar Horizon.
+///
+/// Checks:
+/// 1. Device exists
+/// 2. Transaction exists and is successful on Stellar
+/// 3. Amount matches device price
+/// 4. Destination matches device owner wallet
+/// 5. Prevents replay attacks via transaction hash deduplication
+pub async fn verify_payment(
+    tx_hash: &str,
+    device_id: &str,
+    user_address: &str,
+) -> Result<bool, String> {
+    let device = get_mock_devices()
+        .into_iter()
+        .find(|d| d.id == device_id)
+        .ok_or_else(|| "Device not found".to_string())?;
+
+    STELLAR_SERVICE
+        .verify_payment(tx_hash, device.price, user_address)
+        .await
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -281,7 +307,10 @@ mod tests {
 
     #[test]
     fn test_full_text_search_by_name() {
-        let q = DeviceSearchQuery { q: Some("lock".to_string()), ..base_query() };
+        let q = DeviceSearchQuery {
+            q: Some("lock".to_string()),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert_eq!(resp.total, 1);
         assert_eq!(resp.data[0].id, "device-001");
@@ -289,7 +318,10 @@ mod tests {
 
     #[test]
     fn test_full_text_search_by_description() {
-        let q = DeviceSearchQuery { q: Some("night vision".to_string()), ..base_query() };
+        let q = DeviceSearchQuery {
+            q: Some("night vision".to_string()),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert_eq!(resp.total, 1);
         assert_eq!(resp.data[0].id, "device-003");
@@ -297,7 +329,10 @@ mod tests {
 
     #[test]
     fn test_full_text_search_case_insensitive() {
-        let q = DeviceSearchQuery { q: Some("SENSOR".to_string()), ..base_query() };
+        let q = DeviceSearchQuery {
+            q: Some("SENSOR".to_string()),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         // Temperature Sensor, Water Flow Sensor, Humidity Sensor, CO2 sensor (description)
         assert!(resp.total >= 3);
@@ -305,7 +340,10 @@ mod tests {
 
     #[test]
     fn test_full_text_no_match_returns_empty() {
-        let q = DeviceSearchQuery { q: Some("xyznotadevice".to_string()), ..base_query() };
+        let q = DeviceSearchQuery {
+            q: Some("xyznotadevice".to_string()),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert_eq!(resp.total, 0);
         assert!(resp.data.is_empty());
@@ -319,7 +357,10 @@ mod tests {
         };
         let resp = search_devices(&q);
         assert_eq!(resp.total, 2); // Security Camera + Motion Detector Pro
-        assert!(resp.data.iter().all(|d| d.category == DeviceCategory::Security));
+        assert!(resp
+            .data
+            .iter()
+            .all(|d| d.category == DeviceCategory::Security));
     }
 
     #[test]
@@ -335,7 +376,10 @@ mod tests {
 
     #[test]
     fn test_filter_available_only() {
-        let q = DeviceSearchQuery { available: Some(true), ..base_query() };
+        let q = DeviceSearchQuery {
+            available: Some(true),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert!(resp.data.iter().all(|d| d.available));
         assert_eq!(resp.total, 8); // 10 total − 2 unavailable
@@ -343,7 +387,10 @@ mod tests {
 
     #[test]
     fn test_filter_unavailable_only() {
-        let q = DeviceSearchQuery { available: Some(false), ..base_query() };
+        let q = DeviceSearchQuery {
+            available: Some(false),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert!(resp.data.iter().all(|d| !d.available));
         assert_eq!(resp.total, 2);
@@ -351,14 +398,20 @@ mod tests {
 
     #[test]
     fn test_filter_min_price() {
-        let q = DeviceSearchQuery { min_price: Some(7.0), ..base_query() };
+        let q = DeviceSearchQuery {
+            min_price: Some(7.0),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert!(resp.data.iter().all(|d| d.price >= 7.0));
     }
 
     #[test]
     fn test_filter_max_price() {
-        let q = DeviceSearchQuery { max_price: Some(3.0), ..base_query() };
+        let q = DeviceSearchQuery {
+            max_price: Some(3.0),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert!(resp.data.iter().all(|d| d.price <= 3.0));
     }
@@ -461,7 +514,10 @@ mod tests {
 
     #[test]
     fn test_pagination_limit() {
-        let q = DeviceSearchQuery { limit: Some(3), ..base_query() };
+        let q = DeviceSearchQuery {
+            limit: Some(3),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert_eq!(resp.data.len(), 3);
         assert_eq!(resp.limit, 3);
@@ -470,7 +526,10 @@ mod tests {
 
     #[test]
     fn test_pagination_cursor_next_page() {
-        let q1 = DeviceSearchQuery { limit: Some(3), ..base_query() };
+        let q1 = DeviceSearchQuery {
+            limit: Some(3),
+            ..base_query()
+        };
         let resp1 = search_devices(&q1);
         assert_eq!(resp1.data.len(), 3);
 
@@ -494,7 +553,10 @@ mod tests {
     #[test]
     fn test_pagination_last_page_has_no_cursor() {
         // Fetch all results in one page
-        let q = DeviceSearchQuery { limit: Some(100), ..base_query() };
+        let q = DeviceSearchQuery {
+            limit: Some(100),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert_eq!(resp.total, 10);
         assert_eq!(resp.data.len(), 10);
@@ -525,7 +587,10 @@ mod tests {
 
     #[test]
     fn test_limit_clamped_to_100() {
-        let q = DeviceSearchQuery { limit: Some(999), ..base_query() };
+        let q = DeviceSearchQuery {
+            limit: Some(999),
+            ..base_query()
+        };
         let resp = search_devices(&q);
         assert!(resp.limit <= 100);
     }
@@ -534,6 +599,22 @@ mod tests {
     fn test_haversine_distance() {
         // San Francisco → Los Angeles ≈ 559 km
         let dist = haversine_km(37.7749, -122.4194, 34.0522, -118.2437);
-        assert!((dist - 559.0).abs() < 10.0, "expected ~559 km, got {}", dist);
+        assert!(
+            (dist - 559.0).abs() < 10.0,
+            "expected ~559 km, got {}",
+            dist
+        );
+    }
+
+    #[test]
+    fn test_verify_payment_device_not_found() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(verify_payment(
+            "tx_hash",
+            "non-existent-device",
+            "GABCDEF123",
+        ));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Device not found");
     }
 }

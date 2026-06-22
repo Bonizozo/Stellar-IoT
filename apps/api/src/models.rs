@@ -1,6 +1,6 @@
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 // ─── Device ──────────────────────────────────────────────────────────────────
 
@@ -47,17 +47,12 @@ pub enum SortField {
 }
 
 /// Sort direction.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SortOrder {
+    #[default]
     Asc,
     Desc,
-}
-
-impl Default for SortOrder {
-    fn default() -> Self {
-        SortOrder::Asc
-    }
 }
 
 /// Query parameters accepted by `GET /devices/search`.
@@ -114,7 +109,9 @@ pub struct DeviceSearchResponse {
 pub struct PaymentRequest {
     pub device_id: String,
     pub user_address: String,
+    #[allow(dead_code)]
     pub amount: f64,
+    pub tx_hash: String, // Stellar transaction hash to verify
 }
 
 #[derive(Debug, Serialize)]
@@ -122,6 +119,13 @@ pub struct PaymentResponse {
     pub access_granted: bool,
     pub session_id: String,
     pub expires_at: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize)]
+pub struct PaymentError {
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

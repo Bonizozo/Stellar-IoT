@@ -12,3 +12,6 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json"] }
+dotenv = "0.15"
+lazy_static = "1.4"

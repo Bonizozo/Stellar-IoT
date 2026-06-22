@@ -1,11 +1,13 @@
+mod config;
+mod handlers;
 mod models;
 mod routes;
-mod handlers;
 mod services;
+mod stellar_service;
 
-use axum::{Router, http::Method};
-use tower_http::cors::{CorsLayer, Any};
+use axum::{http::Method, Router};
 use std::net::SocketAddr;
+use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
 async fn main() {
@@ -24,7 +26,7 @@ async fn main() {
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
     println!("🚀 Server running on http://{}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
