@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
-import './globals.css'
 import Navbar from '@/components/Navbar'
+import { WalletProvider } from '@/providers/WalletProvider'   // ← Add this
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -18,8 +18,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Navbar />
-        <main className="min-h-screen">{children}</main>
+        <WalletProvider>                    {/* ← Wrap here */}
+          <Navbar />
+          <main className="min-h-screen">{children}</main>
+        </WalletProvider>
       </body>
     </html>
   )

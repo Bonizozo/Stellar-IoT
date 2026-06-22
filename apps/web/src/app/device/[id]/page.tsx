@@ -1,60 +1,195 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
-import PayButton from '@/components/PayButton'
-import { getDevices } from '@/services/api'
-import { Device } from '@/types'
+import React, { useState, useEffect } from 'react';
+import { Search, MapPin, Wifi, Clock, Filter } from 'lucide-react';
 
-export default function DevicePage() {
-  const params = useParams()
-  const [device, setDevice] = useState<Device | null>(null)
-  const [loading, setLoading] = useState(true)
+interface Device {
+  id: string;
+  name: string;
+  type: string;
+  location: string;
+  pricePerUse: number;
+  status: 'online' | 'offline' | 'busy';
+  lastUsed: string;
+  usageCount: number;
+}
 
+const DevicesPage = () => {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedType, setSelectedType] = useState('All');
+  const [loading, setLoading] = useState(true);
+
+  // Mock data (replace with API call to apps/api later)
   useEffect(() => {
-    loadDevice()
-  }, [params.id])
+    const mockDevices: Device[] = [
+      {
+        id: "d1",
+        name: "Smart Camera - Lobby",
+        type: "Camera",
+        location: "New York, USA",
+        pricePerUse: 0.25,
+        status: "online",
+        lastUsed: "2 min ago",
+        usageCount: 124
+      },
+      {
+        id: "d2",
+        name: "Environmental Sensor",
+        type: "Sensor",
+        location: "London, UK",
+        pricePerUse: 0.15,
+        status: "busy",
+        lastUsed: "15 min ago",
+        usageCount: 87
+      },
+      {
+        id: "d3",
+        name: "Industrial Robot Arm",
+        type: "Actuator",
+        location: "Berlin, Germany",
+        pricePerUse: 1.50,
+        status: "offline",
+        lastUsed: "3 hours ago",
+        usageCount: 45
+      },
+    ];
 
-  const loadDevice = async () => {
-    try {
-      const devices = await getDevices()
-      const found = devices.find((d) => d.id === params.id)
-      setDevice(found || null)
-    } catch (error) {
-      console.error('Failed to load device:', error)
-    } finally {
-      setLoading(false)
+    setDevices(mockDevices);
+    setFilteredDevices(mockDevices);
+    setLoading(false);
+  }, []);
+
+  // Live status polling simulation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDevices(prev => prev.map(device => ({
+        ...device,
+        status: Math.random() > 0.85 ? 'busy' : device.status === 'offline' ? 'online' : device.status
+      })));
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Filtering
+  useEffect(() => {
+    let result = [...devices];
+
+    if (searchTerm) {
+      result = result.filter(d => 
+        d.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        d.location.toLowerCase().includes(searchTerm.toLowerCase())
+      );
     }
-  }
 
-  if (loading) return <div className="container mx-auto px-4 py-8">Loading...</div>
-  if (!device) return <div className="container mx-auto px-4 py-8">Device not found</div>
+    if (selectedType !== 'All') {
+      result = result.filter(d => d.type === selectedType);
+    }
+
+    setFilteredDevices(result);
+  }, [searchTerm, selectedType, devices]);
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'online': return 'bg-green-500';
+      case 'busy': return 'bg-yellow-500';
+      case 'offline': return 'bg-red-500';
+      default: return 'bg-gray-500';
+    }
+  };
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold mb-4">{device.name}</h1>
-        <p className="text-gray-600 dark:text-gray-400 mb-6">{device.description}</p>
-        
-        <div className="mb-6">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-gray-700 dark:text-gray-300">Price:</span>
-            <span className="text-2xl font-bold">{device.price} XLM</span>
-          </div>
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-gray-700 dark:text-gray-300">Status:</span>
-            <span className={`px-3 py-1 rounded ${device.available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-              {device.available ? 'Available' : 'Unavailable'}
-            </span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-gray-700 dark:text-gray-300">Location:</span>
-            <span>{device.location}</span>
-          </div>
+    <div className="p-8 max-w-7xl mx-auto">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h1 className="text-4xl font-bold">IoT Device Marketplace</h1>
+          <p className="text-gray-600 mt-2">Browse and connect to available devices</p>
+        </div>
+        <div className="text-sm text-gray-500">
+          {filteredDevices.length} devices available
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-4 mb-8">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-3.5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by device name or location..."
+            className="w-full pl-12 pr-4 py-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
 
-        <PayButton device={device} />
+        <select
+          className="px-5 py-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={selectedType}
+          onChange={(e) => setSelectedType(e.target.value)}
+        >
+          <option value="All">All Types</option>
+          <option value="Camera">Camera</option>
+          <option value="Sensor">Sensor</option>
+          <option value="Actuator">Actuator</option>
+        </select>
+      </div>
+
+      {/* Devices Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {loading ? (
+          <p className="col-span-full text-center py-12">Loading devices...</p>
+        ) : filteredDevices.length === 0 ? (
+          <p className="col-span-full text-center py-12">No devices found.</p>
+        ) : (
+          filteredDevices.map((device) => (
+            <div
+              key={device.id}
+              className="bg-white dark:bg-gray-900 border rounded-3xl p-6 hover:shadow-xl transition-all duration-300"
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-semibold text-xl">{device.name}</h3>
+                  <p className="text-sm text-gray-500 flex items-center gap-1 mt-1">
+                    <MapPin size={16} /> {device.location}
+                  </p>
+                </div>
+
+                <div className={`px-4 py-1.5 rounded-full text-xs font-medium text-white ${getStatusColor(device.status)}`}>
+                  {device.status.toUpperCase()}
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Type</span>
+                  <span className="font-medium">{device.type}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Price per use</span>
+                  <span className="font-semibold text-blue-600">{device.pricePerUse} XLM</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Last used</span>
+                  <span>{device.lastUsed}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Total usages</span>
+                  <span className="font-medium">{device.usageCount}</span>
+                </div>
+              </div>
+
+              <button className="mt-8 w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-medium transition">
+                Connect & Pay
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
-  )
-}
+  );
+};
+
+export default DevicesPage;
