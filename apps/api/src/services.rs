@@ -4,6 +4,7 @@ use crate::models::{
 use crate::stellar_service::StellarService;
 use lazy_static::lazy_static;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 lazy_static! {
     static ref STELLAR_SERVICE: Arc<StellarService> = Arc::new(StellarService::new());
@@ -386,6 +387,36 @@ pub fn end_session(id: &str) -> Result<(), String> {
     } else {
         Err("Session not found".to_string())
     }
+}
+
+lazy_static! {
+    pub static ref TELEMETRY_STORE: std::sync::RwLock<std::collections::HashMap<String, Vec<TelemetryData>>> =
+        std::sync::RwLock::new(std::collections::HashMap::new());
+
+    pub static ref TELEMETRY_CHANNELS: std::sync::RwLock<std::collections::HashMap<String, broadcast::Sender<TelemetryData>>> =
+        std::sync::RwLock::new(std::collections::HashMap::new());
+}
+
+pub fn ingest_telemetry(device_id: &str, data: Vec<TelemetryData>) {
+    let mut store = TELEMETRY_STORE.write().unwrap();
+    let device_store = store.entry(device_id.to_string()).or_insert_with(Vec::new);
+    device_store.extend(data.clone());
+
+    let channels = TELEMETRY_CHANNELS.read().unwrap();
+    if let Some(tx) = channels.get(device_id) {
+        for item in data {
+            let _ = tx.send(item);
+        }
+    }
+}
+
+pub fn subscribe_telemetry(device_id: &str) -> broadcast::Receiver<TelemetryData> {
+    let mut channels = TELEMETRY_CHANNELS.write().unwrap();
+    let tx = channels.entry(device_id.to_string()).or_insert_with(|| {
+        let (tx, _) = broadcast::channel(100);
+        tx
+    });
+    tx.subscribe()
 }
 
 pub fn generate_telemetry_data(device_category: &DeviceCategory, ticks: u64) -> TelemetryData {
