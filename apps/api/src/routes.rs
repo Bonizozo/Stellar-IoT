@@ -8,6 +8,7 @@ use axum::{
 pub fn device_routes() -> Router<WebhookStore> {
     Router::new()
         .route("/devices/search", get(handlers::search_devices))
+        .route("/devices/:id/heartbeat", post(handlers::device_heartbeat))
         .route("/sessions", get(handlers::get_sessions))
         .route(
             "/session/:id",

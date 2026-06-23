@@ -30,6 +30,16 @@ async fn main() {
         .with_state(store)
         .layer(cors);
 
+    // Start background task for heartbeat checking
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            services::check_offline_devices();
+        }
+    });
+
+    // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
     println!("🚀 Server running on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

@@ -35,6 +35,22 @@ pub struct Device {
     pub longitude: f64,
 }
 
+// ─── Device Heartbeat ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct HeartbeatRequest {
+    pub health_metrics: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceStatus {
+    pub device_id: String,
+    pub online: bool,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub missed_heartbeats: u32,
+    pub health_metrics: Option<serde_json::Value>,
+}
+
 // ─── Search / filter ─────────────────────────────────────────────────────────
 
 /// Sort field for device search results.
@@ -164,6 +180,7 @@ pub struct TelemetryData {
     pub string_readings: std::collections::HashMap<String, String>,
     pub is_abnormal: bool,
 }
+
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
 /// Granularity for revenue / session time-series.
