@@ -1,7 +1,7 @@
 use crate::analytics;
 use crate::models::{
     AnalyticsQuery, Device, DeviceSearchQuery, DeviceSearchResponse,
-    PaymentRequest, PaymentResponse, Session,
+    PaymentRequest, PaymentResponse, Session, HeartbeatRequest,
 };
 use crate::services;
 use axum::{
@@ -222,5 +222,16 @@ pub async fn get_device_analytics(
         }
     } else {
         Json(report).into_response()
+    }
+}
+
+/// Process device heartbeat.
+pub async fn device_heartbeat(
+    Path(id): Path<String>,
+    Json(payload): Json<HeartbeatRequest>,
+) -> Result<StatusCode, StatusCode> {
+    match services::record_heartbeat(&id, payload.health_metrics) {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(_) => Err(StatusCode::NOT_FOUND),
     }
 }

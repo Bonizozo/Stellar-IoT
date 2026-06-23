@@ -1,5 +1,5 @@
 use crate::models::{
-    Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder, Session, TelemetryData,
+    Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder, Session, TelemetryData, DeviceStatus,
 };
 use crate::stellar_service::StellarService;
 use lazy_static::lazy_static;
@@ -284,6 +284,52 @@ pub async fn verify_payment(
     STELLAR_SERVICE
         .verify_payment(tx_hash, device.price, user_address)
         .await
+}
+
+lazy_static! {
+    pub static ref DEVICE_STATUSES: std::sync::RwLock<std::collections::HashMap<String, DeviceStatus>> =
+        std::sync::RwLock::new(std::collections::HashMap::new());
+}
+
+pub fn record_heartbeat(device_id: &str, health_metrics: Option<serde_json::Value>) -> Result<(), String> {
+    let devices = get_mock_devices();
+    if !devices.iter().any(|d| d.id == device_id) {
+        return Err("Device not found".to_string());
+    }
+
+    let mut statuses = DEVICE_STATUSES.write().unwrap();
+    let status = statuses.entry(device_id.to_string()).or_insert_with(|| DeviceStatus {
+        device_id: device_id.to_string(),
+        online: true,
+        last_seen: Some(chrono::Utc::now()),
+        missed_heartbeats: 0,
+        health_metrics: health_metrics.clone(),
+    });
+
+    status.online = true;
+    status.last_seen = Some(chrono::Utc::now());
+    status.missed_heartbeats = 0;
+    status.health_metrics = health_metrics;
+
+    Ok(())
+}
+
+pub fn check_offline_devices() {
+    let mut statuses = DEVICE_STATUSES.write().unwrap();
+    let now = chrono::Utc::now();
+    for (id, status) in statuses.iter_mut() {
+        if let Some(last_seen) = status.last_seen {
+            let duration = now.signed_duration_since(last_seen);
+            let expected_heartbeats_missed = duration.num_seconds() / 60;
+            if expected_heartbeats_missed >= 3 && status.online {
+                status.online = false;
+                status.missed_heartbeats = expected_heartbeats_missed as u32;
+                println!("Notification: Device owner of {} notified - Device is offline! Missed heartbeats: {}", id, status.missed_heartbeats);
+            } else if !status.online {
+                status.missed_heartbeats = expected_heartbeats_missed as u32;
+            }
+        }
+    }
 }
 
 lazy_static! {
