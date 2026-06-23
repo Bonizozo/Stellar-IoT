@@ -1,5 +1,5 @@
 use crate::models::{
-    Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder, Session, TelemetryData, DeviceStatus,
+    Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder, Session, TelemetryData, DeviceStatus, Review, ReviewRequest,
 };
 use crate::stellar_service::StellarService;
 use lazy_static::lazy_static;
@@ -163,7 +163,8 @@ pub fn get_mock_devices() -> Vec<Device> {
 /// cursor-based pagination to the device catalogue.
 pub fn search_devices(query: &DeviceSearchQuery) -> DeviceSearchResponse {
     let limit = query.limit.unwrap_or(20).clamp(1, 100);
-    let all_devices = get_mock_devices();
+    let mut all_devices = get_mock_devices();
+    enrich_devices_with_ratings(&mut all_devices);
 
     // ── 1. Full-text filter ───────────────────────────────────────────────
     let needle = query.q.as_deref().unwrap_or("").to_lowercase();
@@ -199,6 +200,12 @@ pub fn search_devices(query: &DeviceSearchQuery) -> DeviceSearchResponse {
             }
             if let Some(max) = query.max_price {
                 if d.price > max {
+                    return false;
+                }
+            }
+            // Minimum rating
+            if let Some(min_r) = query.min_rating {
+                if d.rating < min_r {
                     return false;
                 }
             }
@@ -517,13 +524,65 @@ pub fn generate_telemetry_data(device_category: &DeviceCategory, ticks: u64) -> 
         }
     }
 
-    TelemetryData {
+            TelemetryData {
         timestamp: now,
         numeric_readings,
         boolean_readings,
         string_readings,
         is_abnormal,
     }
+}
+
+pub fn enrich_devices_with_ratings(devices: &mut Vec<Device>) {
+    let reviews = REVIEWS.read().unwrap();
+    for d in devices {
+        if let Some(device_reviews) = reviews.get(&d.id) {
+            if !device_reviews.is_empty() {
+                let sum: u64 = device_reviews.iter().map(|r| r.rating as u64).sum();
+                d.rating = sum as f64 / device_reviews.len() as f64;
+            }
+        }
+    }
+}
+
+lazy_static! {
+    pub static ref REVIEWS: std::sync::RwLock<std::collections::HashMap<String, Vec<Review>>> =
+        std::sync::RwLock::new(std::collections::HashMap::new());
+}
+
+pub fn add_review(device_id: &str, req: ReviewRequest) -> Result<Review, String> {
+    if req.rating < 1 || req.rating > 5 {
+        return Err("Rating must be between 1 and 5".to_string());
+    }
+    if req.comment.len() > 1000 {
+        return Err("Comment is too long".to_string());
+    }
+
+    let sessions = SESSIONS.read().unwrap();
+    let has_session = sessions.values().any(|s| s.user_address == req.user_address && s.device_id == device_id);
+    if !has_session {
+        return Err("Must have an active or past session to review (verified purchase only)".to_string());
+    }
+
+    let review = Review {
+        id: uuid::Uuid::new_v4().to_string(),
+        device_id: device_id.to_string(),
+        user_address: req.user_address,
+        rating: req.rating,
+        comment: req.comment,
+        verified_purchase: true,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let mut reviews = REVIEWS.write().unwrap();
+    reviews.entry(device_id.to_string()).or_insert_with(Vec::new).push(review.clone());
+
+    Ok(review)
+}
+
+pub fn get_reviews(device_id: &str) -> Vec<Review> {
+    let reviews = REVIEWS.read().unwrap();
+    reviews.get(device_id).cloned().unwrap_or_default()
 }
 
 fn rand_noise(ticks: u64) -> f64 {

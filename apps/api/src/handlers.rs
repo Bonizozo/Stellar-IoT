@@ -2,6 +2,7 @@ use crate::analytics;
 use crate::models::{
     AnalyticsQuery, Device, DeviceSearchQuery, DeviceSearchResponse,
     PaymentRequest, PaymentResponse, Session, HeartbeatRequest, TelemetryUploadRequest,
+    Review, ReviewRequest,
 };
 use crate::services;
 use axum::{
@@ -14,7 +15,9 @@ use serde::Deserialize;
 
 /// Get all available devices (unchanged — keeps backwards compatibility).
 pub async fn get_devices() -> Json<Vec<Device>> {
-    Json(services::get_mock_devices())
+    let mut devices = services::get_mock_devices();
+    services::enrich_devices_with_ratings(&mut devices);
+    Json(devices)
 }
 
 /// Search and filter devices.
@@ -240,4 +243,20 @@ pub async fn upload_telemetry(
 
     services::ingest_telemetry(&id, payload.data);
     Ok(StatusCode::OK)
+}
+
+pub async fn add_device_review(
+    Path(id): Path<String>,
+    Json(req): Json<ReviewRequest>,
+) -> Result<Json<Review>, (StatusCode, String)> {
+    match services::add_review(&id, req) {
+        Ok(review) => Ok(Json(review)),
+        Err(e) => Err((StatusCode::BAD_REQUEST, e)),
+    }
+}
+
+pub async fn get_device_reviews(
+    Path(id): Path<String>,
+) -> Json<Vec<Review>> {
+    Json(services::get_reviews(&id))
 }

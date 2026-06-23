@@ -87,6 +87,7 @@ pub struct DeviceSearchQuery {
     pub available: Option<bool>,
     pub min_price: Option<f64>,
     pub max_price: Option<f64>,
+    pub min_rating: Option<f64>,
 
     // ── Geospatial ─────────────────────────────────────────────────────────
     /// Centre-point latitude for proximity search.
@@ -185,6 +186,26 @@ pub struct TelemetryData {
 pub struct TelemetryUploadRequest {
     pub session_id: String,
     pub data: Vec<TelemetryData>,
+}
+
+// ─── Rating and Reviews ──────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ReviewRequest {
+    pub user_address: String,
+    pub rating: u8,
+    pub comment: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Review {
+    pub id: String,
+    pub device_id: String,
+    pub user_address: String,
+    pub rating: u8,
+    pub comment: String,
+    pub verified_purchase: bool,
+    pub created_at: String,
 }
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
