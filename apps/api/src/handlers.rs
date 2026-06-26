@@ -1,24 +1,19 @@
 use crate::analytics;
+use crate::device_registry::{self, RegistryError};
 use crate::models::{
-    AnalyticsQuery, Device, DeviceSearchQuery, DeviceSearchResponse,
+    AnalyticsQuery, DeviceSearchQuery, DeviceSearchResponse,
     PaymentRequest, PaymentResponse, Session, HeartbeatRequest, TelemetryUploadRequest,
-    Review, ReviewRequest,
+    Review, ReviewRequest, DeviceListQuery, DeviceRegistrationRequest, DeviceRegistrationResponse,
+    DeviceUpdateRequest, ManagedDevice, PaymentHistoryQuery, QrScanRequest, QrScanAnalytics,
 };
 use crate::services;
 use axum::{
     extract::{Path, Query, ws::{WebSocketUpgrade, WebSocket, Message}},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
-
-/// Get all available devices (unchanged — keeps backwards compatibility).
-pub async fn get_devices() -> Json<Vec<Device>> {
-    let mut devices = services::get_mock_devices();
-    services::enrich_devices_with_ratings(&mut devices);
-    Json(devices)
-}
 
 /// Search and filter devices.
 pub async fn search_devices(Query(query): Query<DeviceSearchQuery>) -> Json<DeviceSearchResponse> {
@@ -259,4 +254,160 @@ pub async fn get_device_reviews(
     Path(id): Path<String>,
 ) -> Json<Vec<Review>> {
     Json(services::get_reviews(&id))
+}
+
+// ─── Device Registration & Management (CRUD) ───────────────────────────────────
+
+/// Map a [`RegistryError`] onto an HTTP status + message.
+fn registry_error_response(err: RegistryError) -> (StatusCode, String) {
+    match err {
+        RegistryError::NotFound => (StatusCode::NOT_FOUND, "Device not found".to_string()),
+        RegistryError::Unauthorized => (
+            StatusCode::UNAUTHORIZED,
+            "Missing X-Owner-Address header".to_string(),
+        ),
+        RegistryError::Forbidden => (
+            StatusCode::FORBIDDEN,
+            "You are not the owner of this device".to_string(),
+        ),
+        RegistryError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
+    }
+}
+
+/// Extract the owner Stellar address from the `X-Owner-Address` header.
+fn owner_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-owner-address")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+/// `POST /devices` — register a new device.
+pub async fn register_device(
+    Json(req): Json<DeviceRegistrationRequest>,
+) -> Result<(StatusCode, Json<DeviceRegistrationResponse>), (StatusCode, String)> {
+    match device_registry::register(req) {
+        Ok(device) => Ok((
+            StatusCode::CREATED,
+            Json(DeviceRegistrationResponse {
+                id: device.id,
+                name: device.name,
+                message: "Device registered successfully".to_string(),
+            }),
+        )),
+        Err(e) => Err(registry_error_response(e)),
+    }
+}
+
+/// `GET /devices` — list managed devices with filters and pagination.
+///
+/// Returns a JSON array (backwards-compatible) and exposes pagination metadata
+/// via the `X-Total-Count`, `X-Limit` and `X-Offset` response headers.
+pub async fn list_devices(Query(query): Query<DeviceListQuery>) -> Response {
+    let result = device_registry::list(&query);
+    (
+        StatusCode::OK,
+        [
+            ("x-total-count", result.total.to_string()),
+            ("x-limit", result.limit.to_string()),
+            ("x-offset", result.offset.to_string()),
+        ],
+        Json(result.data),
+    )
+        .into_response()
+}
+
+/// `GET /devices/:id` — device details.
+pub async fn get_managed_device(
+    Path(id): Path<String>,
+) -> Result<Json<ManagedDevice>, (StatusCode, String)> {
+    match device_registry::get(&id) {
+        Some(device) => Ok(Json(device)),
+        None => Err((StatusCode::NOT_FOUND, "Device not found".to_string())),
+    }
+}
+
+/// `PUT /devices/:id` — update device info (owner-authenticated).
+pub async fn update_device(
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<DeviceUpdateRequest>,
+) -> Result<Json<ManagedDevice>, (StatusCode, String)> {
+    let owner = owner_from_headers(&headers);
+    match device_registry::update(&id, owner.as_deref(), req) {
+        Ok(device) => Ok(Json(device)),
+        Err(e) => Err(registry_error_response(e)),
+    }
+}
+
+/// `DELETE /devices/:id` — deregister a device (owner-authenticated).
+pub async fn delete_device(
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let owner = owner_from_headers(&headers);
+    match device_registry::delete(&id, owner.as_deref()) {
+        Ok(_) => Ok(StatusCode::NO_CONTENT),
+        Err(e) => Err(registry_error_response(e)),
+    }
+}
+
+// ─── Payment History ───────────────────────────────────────────────────────────
+
+/// `GET /payments` — paginated, filterable payment history for a user.
+///
+/// Query params: `user` (required), `device_id`, `status`, `from`, `to`,
+/// `format` (`json` | `csv`).
+pub async fn get_payment_history(Query(query): Query<PaymentHistoryQuery>) -> Response {
+    let report = services::get_payment_history(&query);
+
+    let want_csv = query
+        .format
+        .as_deref()
+        .map(|f| f.eq_ignore_ascii_case("csv"))
+        .unwrap_or(false);
+
+    if want_csv {
+        match services::payment_history_to_csv(&report) {
+            Ok(csv) => (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        "attachment; filename=\"payment-history.csv\"",
+                    ),
+                ],
+                csv,
+            )
+                .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e })),
+            )
+                .into_response(),
+        }
+    } else {
+        Json(report).into_response()
+    }
+}
+
+// ─── QR Code Scan Analytics ────────────────────────────────────────────────────
+
+/// `POST /devices/:id/qr-scan` — record a QR-code scan.
+///
+/// The optional `source` query param tags the scan (e.g. a print batch).
+pub async fn record_qr_scan(
+    Path(id): Path<String>,
+    Query(req): Query<QrScanRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    match services::record_qr_scan(&id, req.source) {
+        Ok(_) => Ok(StatusCode::OK),
+        Err(e) => Err((StatusCode::NOT_FOUND, e)),
+    }
+}
+
+/// `GET /devices/:id/qr-analytics` — QR-scan analytics for a device.
+pub async fn get_qr_analytics(Path(id): Path<String>) -> Json<QrScanAnalytics> {
+    Json(services::get_qr_analytics(&id))
 }

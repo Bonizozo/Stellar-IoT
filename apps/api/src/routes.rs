@@ -8,7 +8,13 @@ use axum::{
 
 pub fn device_routes() -> Router {
     Router::new()
-        .route("/devices", get(handlers::get_devices))
+        .route("/devices", get(handlers::list_devices).post(handlers::register_device))
+        .route(
+            "/devices/:id",
+            get(handlers::get_managed_device)
+                .put(handlers::update_device)
+                .delete(handlers::delete_device),
+        )
         .route("/devices/search", get(handlers::search_devices))
         .route("/devices/:id/heartbeat", post(handlers::device_heartbeat))
         .route("/devices/:id/telemetry", post(handlers::upload_telemetry))

@@ -49,6 +49,82 @@ export interface DeviceRegistrationResponse {
   message: string
 }
 
+// ─── Device Management (CRUD) ──────────────────────────────────────────────────
+
+export interface ManagedDevice {
+  id: string
+  name: string
+  type: DeviceCategory
+  description: string
+  price: number
+  available: boolean
+  location: string
+  connectivity: string
+  owner_address: string
+  rating: number
+  popularity: number
+  latitude: number
+  longitude: number
+  created_at: string
+  updated_at: string
+}
+
+export interface DeviceUpdateForm {
+  name?: string
+  description?: string
+  price?: number
+  location?: string
+  available?: boolean
+  connectivity?: ConnectivityType
+  type?: DeviceCategory
+}
+
+// ─── Payment History ───────────────────────────────────────────────────────────
+
+export type PaymentStatus = 'active' | 'expired' | 'ended'
+
+export interface PaymentHistoryEntry {
+  id: string
+  tx_hash: string
+  device_id: string
+  device_name: string
+  user_address: string
+  amount: number
+  session_id: string
+  created_at: string
+  expires_at: string
+  status: PaymentStatus
+  duration_secs: number
+}
+
+export interface PaymentHistoryResponse {
+  data: PaymentHistoryEntry[]
+  total_spent: number
+  total_sessions: number
+  total_duration_secs: number
+}
+
+export interface PaymentHistoryFilters {
+  device_id?: string
+  status?: PaymentStatus
+  from?: string
+  to?: string
+}
+
+// ─── QR Code Scan Analytics ──────────────────────────────────────────────────────
+
+export interface QrScanDailyPoint {
+  date: string
+  scans: number
+}
+
+export interface QrScanAnalytics {
+  device_id: string
+  total_scans: number
+  last_scan: string | null
+  daily: QrScanDailyPoint[]
+}
+
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
 export type ReportPeriod = 'daily' | 'weekly' | 'monthly'
