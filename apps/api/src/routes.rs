@@ -27,7 +27,9 @@ pub fn device_routes() -> Router {
 }
 
 pub fn payment_routes() -> Router {
-    Router::new().route("/pay", post(handlers::process_payment))
+    Router::new()
+        .route("/pay", post(handlers::process_payment))
+        .route("/payments", get(handlers::get_payment_history))
 }
 
 pub fn webhook_routes() -> Router<WebhookStore> {

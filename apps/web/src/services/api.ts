@@ -130,3 +130,53 @@ export function getAnalyticsCsvUrl(
   if (lookback) params.set('lookback', String(lookback))
   return `${API_URL}/devices/${deviceId}/analytics?${params}`
 }
+
+// ─── Payment History ───────────────────────────────────────────────────────────
+
+function paymentHistoryParams(user: string, filters: PaymentHistoryFilters = {}): URLSearchParams {
+  const params = new URLSearchParams({ user })
+  if (filters.device_id) params.set('device_id', filters.device_id)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
+  return params
+}
+
+export async function getPaymentHistory(
+  user: string,
+  filters: PaymentHistoryFilters = {},
+): Promise<PaymentHistoryResponse> {
+  const params = paymentHistoryParams(user, filters)
+  const response = await fetch(`${API_URL}/payments?${params}`)
+  if (!response.ok) throw new Error('Failed to fetch payment history')
+  return response.json()
+}
+
+export function getPaymentHistoryCsvUrl(user: string, filters: PaymentHistoryFilters = {}): string {
+  const params = paymentHistoryParams(user, filters)
+  params.set('format', 'csv')
+  return `${API_URL}/payments?${params}`
+}
+
+// ─── QR Code Scan Analytics ──────────────────────────────────────────────────────
+
+/**
+ * Records a QR-code scan for a device. Fire-and-forget: failures are swallowed
+ * so analytics tracking never blocks the user's access flow.
+ */
+export async function recordQrScan(deviceId: string, source?: string): Promise<void> {
+  const params = new URLSearchParams()
+  if (source) params.set('source', source)
+  const query = params.toString() ? `?${params}` : ''
+  try {
+    await fetch(`${API_URL}/devices/${deviceId}/qr-scan${query}`, { method: 'POST' })
+  } catch {
+    /* analytics is best-effort */
+  }
+}
+
+export async function getQrAnalytics(deviceId: string): Promise<QrScanAnalytics> {
+  const response = await fetch(`${API_URL}/devices/${deviceId}/qr-analytics`)
+  if (!response.ok) throw new Error('Failed to fetch QR analytics')
+  return response.json()
+}

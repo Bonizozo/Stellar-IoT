@@ -31,6 +31,8 @@ pub async fn process_payment(
         Ok(true) => {
             // Payment verified - grant access and store session in global store
             let session = services::create_session(payment.device_id, payment.user_address);
+            // Record the payment so it appears in the user's transaction history.
+            services::record_payment(&payment.tx_hash, payment.amount, &session);
             Ok(Json(PaymentResponse {
                 access_granted: true,
                 session_id: session.id,
@@ -77,11 +79,15 @@ pub async fn extend_session(
     {
         Ok(true) => {
             match services::extend_session(&id, 1) {
-                Ok(session) => Ok(Json(PaymentResponse {
-                    access_granted: true,
-                    session_id: session.id,
-                    expires_at: session.expires_at.to_rfc3339(),
-                })),
+                Ok(session) => {
+                    // Record the extension as a payment in the user's history.
+                    services::record_payment(&payment.tx_hash, payment.amount, &session);
+                    Ok(Json(PaymentResponse {
+                        access_granted: true,
+                        session_id: session.id,
+                        expires_at: session.expires_at.to_rfc3339(),
+                    }))
+                }
                 Err(_) => Err(StatusCode::NOT_FOUND),
             }
         }
