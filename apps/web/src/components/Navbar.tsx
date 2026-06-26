@@ -33,6 +33,9 @@ export default function Navbar() {
             <Link href="/sessions" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
               Sessions
             </Link>
+            <Link href="/earnings" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
+              Earnings
+            </Link>
             <Link href="/register" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
               Register Device
             </Link>

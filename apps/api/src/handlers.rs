@@ -1,6 +1,7 @@
 use crate::analytics;
 use crate::models::{
     AnalyticsQuery, Device, DeviceSearchQuery, DeviceSearchResponse,
+    OwnerEarningsQuery, WithdrawalRequest, WithdrawalResponse,
     PaymentRequest, PaymentResponse, Session, HeartbeatRequest, TelemetryUploadRequest,
     Review, ReviewRequest,
 };
@@ -12,6 +13,64 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+
+// ─── Earnings / Owner Dashboard ──────────────────────────────────────────────
+
+/// `GET /earnings` — aggregate earnings summary for a device owner.
+///
+/// Query params:
+/// - `owner_address` — Stellar public key of the device owner (required)
+/// - `period`        — daily | weekly | monthly (default: daily)
+/// - `lookback`      — number of periods to include (default: 30/12/12)
+pub async fn get_owner_earnings(
+    Query(query): Query<OwnerEarningsQuery>,
+) -> Json<serde_json::Value> {
+    if query.owner_address.is_empty() {
+        return Json(serde_json::json!({ "error": "owner_address is required" }));
+    }
+    let report = analytics::generate_owner_report(&query);
+    Json(serde_json::to_value(&report).unwrap_or_default())
+}
+
+/// `GET /earnings/devices` — per-device status and earnings for an owner.
+///
+/// Query params:
+/// - `owner_address` — Stellar public key (required)
+pub async fn get_owner_devices(
+    Query(query): Query<OwnerEarningsQuery>,
+) -> Json<serde_json::Value> {
+    if query.owner_address.is_empty() {
+        return Json(serde_json::json!({ "error": "owner_address is required" }));
+    }
+    let statuses = analytics::get_owner_device_statuses(&query.owner_address);
+    Json(serde_json::to_value(&statuses).unwrap_or_default())
+}
+
+/// `POST /earnings/withdraw` — request a payout of accumulated earnings.
+///
+/// Body:
+/// ```json
+/// { "owner_address": "G...", "amount": 100.0, "destination_address": "G..." }
+/// ```
+///
+/// Returns a mock transaction hash.  In production the frontend would
+/// create a Stellar payment operation and sign it via Freighter.
+pub async fn withdraw_earnings(
+    Json(req): Json<WithdrawalRequest>,
+) -> Result<Json<WithdrawalResponse>, (StatusCode, String)> {
+    match services::process_withdrawal(&req.owner_address, req.amount, &req.destination_address) {
+        Ok((tx_hash, fee)) => Ok(Json(WithdrawalResponse {
+            success: true,
+            tx_hash,
+            amount: req.amount,
+            fee,
+            message: "Withdrawal initiated successfully".to_string(),
+        })),
+        Err(e) => Err((StatusCode::BAD_REQUEST, e)),
+    }
+}
+
+// ─── Devices ──────────────────────────────────────────────────────────────────
 
 /// Get all available devices (unchanged — keeps backwards compatibility).
 pub async fn get_devices() -> Json<Vec<Device>> {

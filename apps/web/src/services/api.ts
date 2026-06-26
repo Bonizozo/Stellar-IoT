@@ -1,4 +1,4 @@
-import { Device, PaymentRequest, PaymentResponse, Session, DeviceRegistrationForm, DeviceRegistrationResponse } from '@/types'
+import { Device, PaymentRequest, PaymentResponse, Session, DeviceRegistrationForm, DeviceRegistrationResponse, DeviceAnalyticsReport, ReportPeriod, OwnerEarningsResponse, OwnerDeviceStatus, WithdrawalRequest, WithdrawalResponse } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -58,7 +58,6 @@ export async function registerDevice(data: DeviceRegistrationForm): Promise<Devi
 export function getTelemetryWsUrl(sessionId: string): string {
   const wsBase = API_URL.replace(/^http/, 'ws')
   return `${wsBase}/session/${sessionId}/telemetry`
-import { DeviceAnalyticsReport, ReportPeriod } from '@/types'
 
 export async function getDeviceAnalytics(
   deviceId: string,
@@ -80,4 +79,34 @@ export function getAnalyticsCsvUrl(
   const params = new URLSearchParams({ period, format: 'csv' })
   if (lookback) params.set('lookback', String(lookback))
   return `${API_URL}/devices/${deviceId}/analytics?${params}`
+}
+
+// ─── Earnings / Owner Dashboard ───────────────────────────────────────────────
+
+export async function getOwnerEarnings(
+  ownerAddress: string,
+  period: ReportPeriod = 'daily',
+  lookback?: number,
+): Promise<OwnerEarningsResponse> {
+  const params = new URLSearchParams({ owner_address: ownerAddress, period })
+  if (lookback) params.set('lookback', String(lookback))
+  const response = await fetch(`${API_URL}/earnings?${params}`)
+  if (!response.ok) throw new Error('Failed to fetch earnings')
+  return response.json()
+}
+
+export async function getOwnerDevices(ownerAddress: string): Promise<OwnerDeviceStatus[]> {
+  const response = await fetch(`${API_URL}/earnings/devices?owner_address=${encodeURIComponent(ownerAddress)}`)
+  if (!response.ok) throw new Error('Failed to fetch owner devices')
+  return response.json()
+}
+
+export async function withdrawEarnings(req: WithdrawalRequest): Promise<WithdrawalResponse> {
+  const response = await fetch(`${API_URL}/earnings/withdraw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!response.ok) throw new Error('Withdrawal failed')
+  return response.json()
 }

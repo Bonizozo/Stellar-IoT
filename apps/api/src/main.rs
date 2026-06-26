@@ -26,6 +26,7 @@ async fn main() {
     let app = Router::new()
         .merge(routes::device_routes())
         .merge(routes::payment_routes())
+        .merge(routes::earnings_routes())
         .merge(routes::webhook_routes().with_state(store))
         .layer(cors);
 

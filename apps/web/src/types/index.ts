@@ -83,3 +83,49 @@ export interface DeviceAnalyticsReport {
   peak_hours: PeakHour[]
   retention: RetentionRow[]
 }
+
+// ─── Earnings / Owner Dashboard ───────────────────────────────────────────────
+
+export interface OwnerEarningsResponse {
+  total_earnings_xlm: number
+  pending_earnings_xlm: number
+  total_devices: number
+  total_sessions: number
+  period: string
+  time_series: TimeSeriesPoint[]
+  top_devices: TopDevice[]
+  uptime_avg: number
+}
+
+export interface TopDevice {
+  id: string
+  name: string
+  earnings: number
+  sessions: number
+  uptime_pct: number
+}
+
+export interface OwnerDeviceStatus {
+  id: string
+  name: string
+  online: boolean
+  uptime_pct: number
+  last_seen: string | null
+  total_sessions: number
+  total_earnings: number
+  price: number
+}
+
+export interface WithdrawalRequest {
+  owner_address: string
+  amount: number
+  destination_address: string
+}
+
+export interface WithdrawalResponse {
+  success: boolean
+  tx_hash: string
+  amount: number
+  fee: number
+  message: string
+}

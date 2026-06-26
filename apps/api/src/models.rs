@@ -33,6 +33,8 @@ pub struct Device {
     pub latitude: f64,
     /// WGS-84 longitude for geospatial queries.
     pub longitude: f64,
+    /// Stellar public key of the device owner.
+    pub owner_address: String,
 }
 
 // ─── Device Heartbeat ────────────────────────────────────────────────────────
@@ -262,6 +264,75 @@ pub struct RetentionRow {
     pub returning_users: u64,
     pub retention_rate: f64,
 }
+
+// ─── Earnings / Owner Dashboard ──────────────────────────────────────────────
+
+/// Query parameters for `GET /earnings`.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct OwnerEarningsQuery {
+    pub owner_address: String,
+    /// Time-series granularity: daily | weekly | monthly  (default: daily)
+    #[serde(default)]
+    pub period: ReportPeriod,
+    /// How many periods to look back (default: 30 for daily, 12 for weekly/monthly).
+    pub lookback: Option<usize>,
+}
+
+/// Aggregate earnings summary for a device owner.
+#[derive(Debug, Serialize)]
+pub struct OwnerEarningsResponse {
+    pub total_earnings_xlm: f64,
+    pub pending_earnings_xlm: f64,
+    pub total_devices: usize,
+    pub total_sessions: u64,
+    pub period: String,
+    pub time_series: Vec<TimeSeriesPoint>,
+    pub top_devices: Vec<TopDevice>,
+    pub uptime_avg: f64,
+}
+
+/// One device in the owner's top-performing list.
+#[derive(Debug, Clone, Serialize)]
+pub struct TopDevice {
+    pub id: String,
+    pub name: String,
+    pub earnings: f64,
+    pub sessions: u64,
+    pub uptime_pct: f64,
+}
+
+/// Response for `GET /earnings/devices`.
+#[derive(Debug, Serialize)]
+pub struct OwnerDeviceStatus {
+    pub id: String,
+    pub name: String,
+    pub online: bool,
+    pub uptime_pct: f64,
+    pub last_seen: Option<String>,
+    pub total_sessions: u64,
+    pub total_earnings: f64,
+    pub price: f64,
+}
+
+/// Request body for `POST /earnings/withdraw`.
+#[derive(Debug, Deserialize)]
+pub struct WithdrawalRequest {
+    pub owner_address: String,
+    pub amount: f64,
+    pub destination_address: String,
+}
+
+/// Response from `POST /earnings/withdraw`.
+#[derive(Debug, Serialize)]
+pub struct WithdrawalResponse {
+    pub success: bool,
+    pub tx_hash: String,
+    pub amount: f64,
+    pub fee: f64,
+    pub message: String,
+}
+
+// ─── Analytics (existing) ─────────────────────────────────────────────────────
 
 /// Full analytics report for a single device.
 #[derive(Debug, Serialize)]
