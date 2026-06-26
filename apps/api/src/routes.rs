@@ -19,6 +19,8 @@ pub fn device_routes() -> Router {
         .route("/devices/:id/heartbeat", post(handlers::device_heartbeat))
         .route("/devices/:id/telemetry", post(handlers::upload_telemetry))
         .route("/devices/:id/reviews", post(handlers::add_device_review).get(handlers::get_device_reviews))
+        .route("/devices/:id/qr-scan", post(handlers::record_qr_scan))
+        .route("/devices/:id/qr-analytics", get(handlers::get_qr_analytics))
         .route("/sessions", get(handlers::get_sessions))
         .route("/session/:id", get(handlers::get_session).delete(handlers::end_session))
         .route("/session/:id/extend", post(handlers::extend_session))
