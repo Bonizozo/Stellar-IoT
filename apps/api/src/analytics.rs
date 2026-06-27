@@ -7,9 +7,10 @@
 /// internally consistent across endpoints and respond correctly to the chosen
 /// `period` / `lookback` query parameters.
 use crate::models::{
-    AnalyticsQuery, DeviceAnalyticsReport, PeakHour, ReportPeriod, RetentionRow, TimeSeriesPoint,
+    AnalyticsQuery, DeviceAnalyticsReport, OwnerEarningsQuery, OwnerEarningsResponse,
+    OwnerDeviceStatus, PeakHour, ReportPeriod, RetentionRow, TimeSeriesPoint, TopDevice,
 };
-use crate::services::get_mock_devices;
+use crate::services::{get_mock_devices, DEVICE_STATUSES};
 use chrono::{Datelike, Duration, Utc};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -40,6 +41,181 @@ fn pseudo_rand(seed: u64) -> f64 {
     x ^= x >> 7;
     x ^= x << 17;
     (x % 10_000) as f64 / 10_000.0
+}
+
+// ─── Owner earnings analytics ────────────────────────────────────────────────
+
+/// Generate an aggregate earnings report for all devices owned by `owner_address`.
+pub fn generate_owner_report(query: &OwnerEarningsQuery) -> OwnerEarningsResponse {
+    let period = &query.period;
+    let lookback = query.lookback.unwrap_or_else(|| default_lookback(period));
+    let step = period_days(period);
+    let today = Utc::now().date_naive();
+
+    let devices = get_mock_devices()
+        .into_iter()
+        .filter(|d| d.owner_address == query.owner_address)
+        .collect::<Vec<_>>();
+
+    let total_devices = devices.len();
+
+    // Aggregate time-series across all owned devices.
+    let mut time_series_map: std::collections::HashMap<String, (f64, u64)> =
+        std::collections::HashMap::new();
+
+    let mut overall_revenue = 0.0f64;
+    let mut overall_sessions = 0u64;
+    let mut top_devices: Vec<TopDevice> = Vec::with_capacity(total_devices);
+
+    for device in &devices {
+        let base_sessions_per_period =
+            (device.popularity as f64 / 365.0 * step as f64).max(1.0) as u64;
+        let mut device_revenue = 0.0f64;
+        let mut device_sessions = 0u64;
+
+        for i in (0..lookback).rev() {
+            let period_start = today - Duration::days(step * (i as i64 + 1) - step);
+            let period_start = period_start
+                - Duration::days(match period {
+                    ReportPeriod::Weekly => period_start.weekday().num_days_from_monday() as i64,
+                    ReportPeriod::Monthly => (period_start.day0()) as i64,
+                    ReportPeriod::Daily => 0,
+                });
+
+            let seed = fnv1a_hash(&device.id) ^ (i as u64 * 6_364_136_223_846_793_005);
+            let variance = 0.6 + pseudo_rand(seed) * 0.8;
+            let sessions = ((base_sessions_per_period as f64) * variance).round() as u64;
+            let revenue = sessions as f64 * device.price;
+
+            let entry = time_series_map
+                .entry(period_start.to_string())
+                .or_insert((0.0, 0));
+            entry.0 += revenue;
+            entry.1 += sessions;
+
+            device_revenue += revenue;
+            device_sessions += sessions;
+        }
+
+        overall_revenue += device_revenue;
+        overall_sessions += device_sessions;
+
+        // Simulate uptime from health status.
+        let uptime_pct = get_device_uptime(&device.id).unwrap_or(99.0);
+
+        top_devices.push(TopDevice {
+            id: device.id.clone(),
+            name: device.name.clone(),
+            earnings: round2(device_revenue),
+            sessions: device_sessions,
+            uptime_pct,
+        });
+    }
+
+    // Sort top devices by earnings descending.
+    top_devices.sort_by(|a, b| b.earnings.partial_cmp(&a.earnings).unwrap());
+
+    // Build sorted time-series.
+    let mut time_series: Vec<TimeSeriesPoint> = time_series_map
+        .into_iter()
+        .map(|(date, (revenue, session_count))| TimeSeriesPoint {
+            date,
+            revenue: round2(revenue),
+            session_count,
+            unique_users: 0,
+        })
+        .collect();
+    time_series.sort_by(|a, b| a.date.cmp(&b.date));
+
+    let uptime_avg = if total_devices > 0 {
+        let sum: f64 = devices.iter().filter_map(|d| get_device_uptime(&d.id)).sum();
+        round2(sum / total_devices as f64)
+    } else {
+        100.0
+    };
+
+    // Pending ≈ 10 % of total (simulating unconfirmed payments in pipeline).
+    let pending = round2(overall_revenue * 0.10);
+
+    let period_label = match period {
+        ReportPeriod::Daily => "daily",
+        ReportPeriod::Weekly => "weekly",
+        ReportPeriod::Monthly => "monthly",
+    };
+
+    OwnerEarningsResponse {
+        total_earnings_xlm: round2(overall_revenue),
+        pending_earnings_xlm: pending,
+        total_devices,
+        total_sessions: overall_sessions,
+        period: period_label.to_string(),
+        time_series,
+        top_devices,
+        uptime_avg,
+    }
+}
+
+/// Return per-device status and earnings for the owner's device list view.
+pub fn get_owner_device_statuses(owner_address: &str) -> Vec<OwnerDeviceStatus> {
+    let devices = get_mock_devices()
+        .into_iter()
+        .filter(|d| d.owner_address == owner_address)
+        .collect::<Vec<_>>();
+
+    let today = Utc::now().date_naive();
+
+    devices
+        .into_iter()
+        .map(|d| {
+            let step = 1i64;
+            let base_sessions =
+                (d.popularity as f64 / 365.0 * step as f64).max(1.0) as u64;
+            let mut total_sessions = 0u64;
+
+            for i in (0..30).rev() {
+                let seed = fnv1a_hash(&d.id) ^ (i as u64 * 6_364_136_223_846_793_005);
+                let variance = 0.6 + pseudo_rand(seed) * 0.8;
+                let sessions = ((base_sessions as f64) * variance).round() as u64;
+                total_sessions += sessions;
+            }
+
+            let total_earnings = total_sessions as f64 * d.price;
+            let uptime_pct = get_device_uptime(&d.id).unwrap_or(99.0);
+            let last_seen = DEVICE_STATUSES
+                .read()
+                .unwrap()
+                .get(&d.id)
+                .and_then(|s| s.last_seen.map(|t| t.to_rfc3339()));
+
+            OwnerDeviceStatus {
+                id: d.id,
+                name: d.name,
+                online: DEVICE_STATUSES
+                    .read()
+                    .unwrap()
+                    .get(&d.id)
+                    .map(|s| s.online)
+                    .unwrap_or(true),
+                uptime_pct,
+                last_seen,
+                total_sessions,
+                total_earnings: round2(total_earnings),
+                price: d.price,
+            }
+        })
+        .collect()
+}
+
+/// Deterministic uptime percentage derived from device id hash.
+fn get_device_uptime(device_id: &str) -> Option<f64> {
+    // Check actual status first; fall back to deterministic mock value.
+    let statuses = DEVICE_STATUSES.read().ok()?;
+    if let Some(status) = statuses.get(device_id) {
+        if !status.online {
+            return Some(85.0 + pseudo_rand(fnv1a_hash(device_id)) * 10.0);
+        }
+    }
+    Some(95.0 + pseudo_rand(fnv1a_hash(device_id) ^ 0xABCD) * 4.9)
 }
 
 // ─── Core analytics generator ────────────────────────────────────────────────

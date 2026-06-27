@@ -41,6 +41,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 320,
             latitude: 37.7749,
             longitude: -122.4194,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-002".to_string(),
@@ -54,6 +55,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 510,
             latitude: 37.7751,
             longitude: -122.4180,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-003".to_string(),
@@ -67,6 +69,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 890,
             latitude: 37.7760,
             longitude: -122.4200,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-004".to_string(),
@@ -80,6 +83,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 210,
             latitude: 37.7730,
             longitude: -122.4210,
+            owner_address: "GA2".to_string(),
         },
         Device {
             id: "device-005".to_string(),
@@ -93,6 +97,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 640,
             latitude: 37.7740,
             longitude: -122.4170,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-006".to_string(),
@@ -106,6 +111,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 175,
             latitude: 37.7755,
             longitude: -122.4165,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-007".to_string(),
@@ -119,6 +125,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 430,
             latitude: 37.7745,
             longitude: -122.4155,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-008".to_string(),
@@ -132,6 +139,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 88,
             latitude: 37.7770,
             longitude: -122.4220,
+            owner_address: "GA2".to_string(),
         },
         Device {
             id: "device-009".to_string(),
@@ -145,6 +153,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 755,
             latitude: 37.7735,
             longitude: -122.4185,
+            owner_address: "GBV".to_string(),
         },
         Device {
             id: "device-010".to_string(),
@@ -158,6 +167,7 @@ pub fn get_mock_devices() -> Vec<Device> {
             popularity: 300,
             latitude: 37.7762,
             longitude: -122.4195,
+            owner_address: "GBV".to_string(),
         },
     ]
 }
@@ -586,6 +596,32 @@ pub fn add_review(device_id: &str, req: ReviewRequest) -> Result<Review, String>
 pub fn get_reviews(device_id: &str) -> Vec<Review> {
     let reviews = REVIEWS.read().unwrap();
     reviews.get(device_id).cloned().unwrap_or_default()
+}
+
+/// Process a withdrawal request — mock implementation.
+///
+/// In production this would create and submit a Stellar payment transaction
+/// using the Stellar SDK, and the frontend would sign it via Freighter.
+pub fn process_withdrawal(
+    owner_address: &str,
+    amount: f64,
+    destination: &str,
+) -> Result<(String, f64), String> {
+    if amount <= 0.0 {
+        return Err("Amount must be positive".to_string());
+    }
+    if owner_address.is_empty() || destination.is_empty() {
+        return Err("Owner and destination addresses are required".to_string());
+    }
+    // Simulate a Stellar transaction hash.
+    let tx_hash = format!(
+        "a1b2c3d4e5f6{}{}",
+        &fnv1a_hash(owner_address).to_string()[..8],
+        &fnv1a_hash(destination).to_string()[..8],
+    );
+    // Simulate a nominal network fee in stroops (1 stroop = 0.0000001 XLM).
+    let fee = 0.00001;
+    Ok((tx_hash, fee))
 }
 
 fn rand_noise(ticks: u64) -> f64 {

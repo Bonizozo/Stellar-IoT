@@ -47,6 +47,13 @@ pub fn payment_routes() -> Router {
         .route("/payments", get(handlers::get_payment_history))
 }
 
+pub fn earnings_routes() -> Router {
+    Router::new()
+        .route("/earnings", get(handlers::get_owner_earnings))
+        .route("/earnings/devices", get(handlers::get_owner_devices))
+        .route("/earnings/withdraw", post(handlers::withdraw_earnings))
+}
+
 pub fn webhook_routes() -> Router<WebhookStore> {
     Router::new()
         .route("/webhooks", post(webhook_handlers::register_webhook).get(webhook_handlers::list_webhooks))

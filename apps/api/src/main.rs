@@ -30,6 +30,7 @@ async fn main() {
         .merge(routes::auth_routes())
         .merge(routes::device_routes())
         .merge(routes::payment_routes())
+        .merge(routes::earnings_routes())
         .merge(routes::webhook_routes().with_state(store))
         .layer(cors);
 
