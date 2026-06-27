@@ -33,8 +33,11 @@ export default function Navbar() {
             <Link href="/sessions" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
               Sessions
             </Link>
-            <Link href="/earnings" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
-              Earnings
+            <Link href="/history" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
+              History
+            </Link>
+            <Link href="/qr" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
+              QR Codes
             </Link>
             <Link href="/register" className="text-gray-700 dark:text-gray-300 hover:text-stellar-purple transition">
               Register Device

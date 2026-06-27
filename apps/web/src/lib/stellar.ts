@@ -58,6 +58,27 @@ export async function buildPaymentTransaction(
 }
 
 /**
+ * Stellar Expert explorer network segment, derived from the configured network.
+ * Defaults to testnet to match the Horizon server used above.
+ */
+const EXPLORER_NETWORK =
+  process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'public' ? 'public' : 'testnet';
+
+/**
+ * Builds a link to a transaction on the Stellar Expert block explorer.
+ */
+export function getExplorerTxUrl(hash: string): string {
+  return `https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${hash}`;
+}
+
+/**
+ * Builds a link to an account on the Stellar Expert block explorer.
+ */
+export function getExplorerAccountUrl(address: string): string {
+  return `https://stellar.expert/explorer/${EXPLORER_NETWORK}/account/${address}`;
+}
+
+/**
  * Validates if a Stellar address is valid
  */
 export function isValidStellarAddress(address: string): boolean {

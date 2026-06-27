@@ -19,3 +19,7 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 lazy_static = "1.4"
+jsonwebtoken = "9"
+ed25519-dalek = { version = "2", features = ["pkcs8"] }
+rand = "0.8"
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono", "json", "migrate"] }

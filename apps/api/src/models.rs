@@ -210,6 +210,195 @@ pub struct Review {
     pub created_at: String,
 }
 
+// ─── Device Registration & Management (CRUD) ───────────────────────────────────
+
+/// Functional device type as supplied by the registration UI.
+///
+/// This is distinct from [`DeviceCategory`] (used by the discovery/search
+/// catalogue) and mirrors the options exposed by the web registration form.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceType {
+    Sensor,
+    Camera,
+    Actuator,
+    Gateway,
+    Tracker,
+    Other,
+}
+
+/// A device record managed through the CRUD API.
+///
+/// It is a superset of the discovery [`Device`] (so existing `GET /devices`
+/// consumers keep working) enriched with ownership and registration metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedDevice {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub device_type: DeviceType,
+    pub description: String,
+    pub price: f64,
+    pub available: bool,
+    pub location: String,
+    pub connectivity: String,
+    /// Stellar address of the device owner; used for write authentication.
+    pub owner_address: String,
+    pub rating: f64,
+    pub popularity: u64,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Body of `POST /devices`.
+#[derive(Debug, Deserialize)]
+pub struct DeviceRegistrationRequest {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub device_type: DeviceType,
+    pub description: String,
+    pub price: f64,
+    pub location: String,
+    pub connectivity: String,
+    pub owner_address: String,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
+/// Response returned by `POST /devices`.
+#[derive(Debug, Serialize)]
+pub struct DeviceRegistrationResponse {
+    pub id: String,
+    pub name: String,
+    pub message: String,
+}
+
+/// Body of `PUT /devices/:id`; every field is optional so callers can patch
+/// only what they need.
+#[derive(Debug, Deserialize)]
+pub struct DeviceUpdateRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub price: Option<f64>,
+    pub location: Option<String>,
+    pub available: Option<bool>,
+    pub connectivity: Option<String>,
+    #[serde(rename = "type")]
+    pub device_type: Option<DeviceType>,
+}
+
+/// Query parameters for `GET /devices` (managed listing).
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DeviceListQuery {
+    /// Filter by owner Stellar address.
+    pub owner: Option<String>,
+    #[serde(rename = "type")]
+    pub device_type: Option<DeviceType>,
+    pub available: Option<bool>,
+    /// Case-insensitive substring match against name and description.
+    pub q: Option<String>,
+    /// Page size (1–100, default 50).
+    pub limit: Option<usize>,
+    /// Number of records to skip (offset pagination, default 0).
+    pub offset: Option<usize>,
+}
+
+/// A single page of managed devices.
+#[derive(Debug, Serialize)]
+pub struct DeviceListResponse {
+    pub data: Vec<ManagedDevice>,
+    /// Total matches before pagination.
+    pub total: usize,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+// ─── Payment History ───────────────────────────────────────────────────────────
+
+/// An immutable record of a verified device payment.
+#[derive(Debug, Clone)]
+pub struct PaymentRecord {
+    pub id: String,
+    pub tx_hash: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub user_address: String,
+    pub amount: f64,
+    pub session_id: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// A payment-history row enriched with the live session status and duration.
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentHistoryEntry {
+    pub id: String,
+    pub tx_hash: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub user_address: String,
+    pub amount: f64,
+    pub session_id: String,
+    pub created_at: String,
+    pub expires_at: String,
+    /// `active` | `expired` | `ended`.
+    pub status: String,
+    /// Session duration in seconds (elapsed for active, total for finished).
+    pub duration_secs: i64,
+}
+
+/// Query parameters for `GET /payments`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaymentHistoryQuery {
+    /// User Stellar address whose payments to return (required).
+    pub user: String,
+    pub device_id: Option<String>,
+    /// `active` | `expired` | `ended`.
+    pub status: Option<String>,
+    /// Inclusive lower bound on the payment date (RFC-3339 or `YYYY-MM-DD`).
+    pub from: Option<String>,
+    /// Inclusive upper bound on the payment date (RFC-3339 or `YYYY-MM-DD`).
+    pub to: Option<String>,
+    /// Export format: `json` (default) | `csv`.
+    pub format: Option<String>,
+}
+
+/// Aggregated payment history for a user.
+#[derive(Debug, Serialize)]
+pub struct PaymentHistoryResponse {
+    pub data: Vec<PaymentHistoryEntry>,
+    pub total_spent: f64,
+    pub total_sessions: usize,
+    pub total_duration_secs: i64,
+}
+
+// ─── QR Code Scan Analytics ────────────────────────────────────────────────────
+
+/// Body of `POST /devices/:id/qr-scan` (all fields optional).
+#[derive(Debug, Deserialize, Default)]
+pub struct QrScanRequest {
+    /// Free-form source label, e.g. a campaign or print-batch id.
+    pub source: Option<String>,
+}
+
+/// One day of QR-scan activity.
+#[derive(Debug, Clone, Serialize)]
+pub struct QrScanDailyPoint {
+    pub date: String,
+    pub scans: u64,
+}
+
+/// QR-scan analytics for a single device.
+#[derive(Debug, Serialize)]
+pub struct QrScanAnalytics {
+    pub device_id: String,
+    pub total_scans: u64,
+    pub last_scan: Option<String>,
+    pub daily: Vec<QrScanDailyPoint>,
+}
+
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
 /// Granularity for revenue / session time-series.

@@ -1,6 +1,9 @@
 use crate::models::{
     Device, DeviceCategory, DeviceSearchQuery, DeviceSearchResponse, SortField, SortOrder, Session, TelemetryData, DeviceStatus, Review, ReviewRequest,
+    PaymentRecord, PaymentHistoryQuery, PaymentHistoryResponse, PaymentHistoryEntry,
+    QrScanAnalytics, QrScanDailyPoint,
 };
+use chrono::{DateTime, Utc};
 use crate::stellar_service::StellarService;
 use lazy_static::lazy_static;
 use std::sync::Arc;
@@ -626,6 +629,235 @@ fn rand_noise(ticks: u64) -> f64 {
     ((ticks * 12345) % 100) as f64 / 500.0 - 0.1
 }
 
+// ─── Payment History ────────────────────────────────────────────────────────────
+
+lazy_static! {
+    pub static ref PAYMENTS: std::sync::RwLock<Vec<PaymentRecord>> =
+        std::sync::RwLock::new(Vec::new());
+}
+
+/// Persist a verified payment so it appears in the user's transaction history.
+pub fn record_payment(tx_hash: &str, amount: f64, session: &Session) {
+    let record = PaymentRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        tx_hash: tx_hash.to_string(),
+        device_id: session.device_id.clone(),
+        device_name: session.device_name.clone(),
+        user_address: session.user_address.clone(),
+        amount,
+        session_id: session.id.clone(),
+        created_at: session.created_at,
+        expires_at: session.expires_at,
+    };
+    PAYMENTS.write().unwrap().push(record);
+}
+
+/// Derive the live status (`active` | `expired` | `ended`) and the session
+/// duration in seconds for a payment record.
+fn payment_status_and_duration(rec: &PaymentRecord) -> (String, i64) {
+    let now = Utc::now();
+    match get_session(&rec.session_id) {
+        Some(s) if s.active && s.expires_at > now => {
+            ("active".to_string(), (now - rec.created_at).num_seconds().max(0))
+        }
+        Some(s) if !s.active => {
+            let end = now.min(s.expires_at);
+            ("ended".to_string(), (end - rec.created_at).num_seconds().max(0))
+        }
+        _ => (
+            "expired".to_string(),
+            (rec.expires_at - rec.created_at).num_seconds().max(0),
+        ),
+    }
+}
+
+/// Parse a filter bound that may be a full RFC-3339 timestamp or a `YYYY-MM-DD`
+/// date. `end_of_day` extends a bare date to 23:59:59 so `to=` is inclusive.
+fn parse_date_bound(value: &str, end_of_day: bool) -> Option<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        let time = if end_of_day {
+            chrono::NaiveTime::from_hms_opt(23, 59, 59)?
+        } else {
+            chrono::NaiveTime::from_hms_opt(0, 0, 0)?
+        };
+        return Some(DateTime::from_naive_utc_and_offset(date.and_time(time), Utc));
+    }
+    None
+}
+
+/// Build a filtered, aggregated payment history for a user.
+pub fn get_payment_history(query: &PaymentHistoryQuery) -> PaymentHistoryResponse {
+    let from = query.from.as_deref().and_then(|v| parse_date_bound(v, false));
+    let to = query.to.as_deref().and_then(|v| parse_date_bound(v, true));
+    let status_filter = query.status.as_deref().map(|s| s.to_lowercase());
+
+    let payments = PAYMENTS.read().unwrap();
+    let mut entries: Vec<PaymentHistoryEntry> = payments
+        .iter()
+        .filter(|p| p.user_address == query.user)
+        .filter(|p| {
+            query
+                .device_id
+                .as_ref()
+                .map(|id| &p.device_id == id)
+                .unwrap_or(true)
+        })
+        .filter(|p| from.map(|f| p.created_at >= f).unwrap_or(true))
+        .filter(|p| to.map(|t| p.created_at <= t).unwrap_or(true))
+        .map(|p| {
+            let (status, duration_secs) = payment_status_and_duration(p);
+            PaymentHistoryEntry {
+                id: p.id.clone(),
+                tx_hash: p.tx_hash.clone(),
+                device_id: p.device_id.clone(),
+                device_name: p.device_name.clone(),
+                user_address: p.user_address.clone(),
+                amount: p.amount,
+                session_id: p.session_id.clone(),
+                created_at: p.created_at.to_rfc3339(),
+                expires_at: p.expires_at.to_rfc3339(),
+                status,
+                duration_secs,
+            }
+        })
+        .filter(|e| {
+            status_filter
+                .as_ref()
+                .map(|s| &e.status == s)
+                .unwrap_or(true)
+        })
+        .collect();
+
+    // Newest first.
+    entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    let total_spent = round2(entries.iter().map(|e| e.amount).sum());
+    let total_duration_secs = entries.iter().map(|e| e.duration_secs).sum();
+
+    PaymentHistoryResponse {
+        total_sessions: entries.len(),
+        total_spent,
+        total_duration_secs,
+        data: entries,
+    }
+}
+
+/// Render a payment history as RFC-4180 CSV for export.
+pub fn payment_history_to_csv(report: &PaymentHistoryResponse) -> Result<String, String> {
+    let mut wtr = csv::WriterBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_writer(vec![]);
+
+    wtr.write_record([
+        "date",
+        "device_id",
+        "device_name",
+        "amount_xlm",
+        "status",
+        "duration_secs",
+        "session_id",
+        "tx_hash",
+    ])
+    .map_err(|e| e.to_string())?;
+
+    for e in &report.data {
+        wtr.write_record([
+            &e.created_at,
+            &e.device_id,
+            &e.device_name,
+            &e.amount.to_string(),
+            &e.status,
+            &e.duration_secs.to_string(),
+            &e.session_id,
+            &e.tx_hash,
+        ])
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Totals footer.
+    wtr.write_record([""]).map_err(|e| e.to_string())?;
+    wtr.write_record(["# Totals"]).map_err(|e| e.to_string())?;
+    wtr.write_record(["total_spent_xlm", &report.total_spent.to_string()])
+        .map_err(|e| e.to_string())?;
+    wtr.write_record(["total_sessions", &report.total_sessions.to_string()])
+        .map_err(|e| e.to_string())?;
+    wtr.write_record(["total_duration_secs", &report.total_duration_secs.to_string()])
+        .map_err(|e| e.to_string())?;
+
+    let bytes = wtr.into_inner().map_err(|e| e.to_string())?;
+    String::from_utf8(bytes).map_err(|e| e.to_string())
+}
+
+fn round2(v: f64) -> f64 {
+    // `+ 0.0` normalises any negative zero to positive zero.
+    (v * 100.0).round() / 100.0 + 0.0
+}
+
+// ─── QR Code Scan Analytics ─────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct QrScan {
+    timestamp: DateTime<Utc>,
+    #[allow(dead_code)]
+    source: Option<String>,
+}
+
+lazy_static! {
+    static ref QR_SCANS: std::sync::RwLock<std::collections::HashMap<String, Vec<QrScan>>> =
+        std::sync::RwLock::new(std::collections::HashMap::new());
+}
+
+/// Record a QR-code scan for a device. Returns `Err` if the device is unknown.
+pub fn record_qr_scan(device_id: &str, source: Option<String>) -> Result<(), String> {
+    if crate::device_registry::get(device_id).is_none() {
+        return Err("Device not found".to_string());
+    }
+    let mut scans = QR_SCANS.write().unwrap();
+    scans
+        .entry(device_id.to_string())
+        .or_insert_with(Vec::new)
+        .push(QrScan {
+            timestamp: Utc::now(),
+            source,
+        });
+    Ok(())
+}
+
+/// Aggregate QR-scan analytics for a device (total, last scan, per-day counts).
+pub fn get_qr_analytics(device_id: &str) -> QrScanAnalytics {
+    let scans = QR_SCANS.read().unwrap();
+    let device_scans = scans.get(device_id).cloned().unwrap_or_default();
+
+    let total_scans = device_scans.len() as u64;
+    let last_scan = device_scans
+        .iter()
+        .map(|s| s.timestamp)
+        .max()
+        .map(|t| t.to_rfc3339());
+
+    // Group by calendar day (UTC).
+    let mut by_day: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    for scan in &device_scans {
+        let day = scan.timestamp.date_naive().to_string();
+        *by_day.entry(day).or_insert(0) += 1;
+    }
+    let daily = by_day
+        .into_iter()
+        .map(|(date, scans)| QrScanDailyPoint { date, scans })
+        .collect();
+
+    QrScanAnalytics {
+        device_id: device_id.to_string(),
+        total_scans,
+        last_scan,
+        daily,
+    }
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -956,5 +1188,111 @@ mod tests {
         ));
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Device not found");
+    }
+
+    // ── Payment history ──────────────────────────────────────────────────────
+
+    fn history_query(user: &str) -> PaymentHistoryQuery {
+        PaymentHistoryQuery {
+            user: user.to_string(),
+            device_id: None,
+            status: None,
+            from: None,
+            to: None,
+            format: None,
+        }
+    }
+
+    #[test]
+    fn test_payment_history_records_and_aggregates() {
+        let user = "GUSERPAYMENTHISTAGG";
+        let session =
+            Session::new("device-001".into(), "Smart Lock Alpha".into(), user.into());
+        SESSIONS
+            .write()
+            .unwrap()
+            .insert(session.id.clone(), session.clone());
+        record_payment("txhashAGG", 5.0, &session);
+
+        let resp = get_payment_history(&history_query(user));
+        assert_eq!(resp.total_sessions, 1);
+        assert_eq!(resp.total_spent, 5.0);
+        assert_eq!(resp.data[0].status, "active");
+        assert_eq!(resp.data[0].tx_hash, "txhashAGG");
+        assert!(resp.data[0].duration_secs >= 0);
+    }
+
+    #[test]
+    fn test_payment_history_csv_export() {
+        let user = "GUSERPAYMENTHISTCSV";
+        let session = Session::new("device-002".into(), "Temperature Sensor".into(), user.into());
+        SESSIONS
+            .write()
+            .unwrap()
+            .insert(session.id.clone(), session.clone());
+        record_payment("txhashCSV", 2.5, &session);
+
+        let resp = get_payment_history(&history_query(user));
+        let csv = payment_history_to_csv(&resp).expect("csv should render");
+        assert!(csv.contains("txhashCSV"));
+        assert!(csv.contains("# Totals"));
+        assert!(csv.contains("total_spent_xlm"));
+    }
+
+    #[test]
+    fn test_payment_history_empty_user_is_zeroed() {
+        let resp = get_payment_history(&history_query("GNOTAREALUSERXYZ"));
+        assert_eq!(resp.total_sessions, 0);
+        assert_eq!(resp.total_spent, 0.0);
+        // Negative zero must be normalised.
+        assert!(resp.total_spent.is_sign_positive());
+    }
+
+    #[test]
+    fn test_payment_history_filters_by_device() {
+        let user = "GUSERPAYMENTHISTDEV";
+        for (dev, name) in [("device-001", "Smart Lock Alpha"), ("device-002", "Temperature Sensor")] {
+            let s = Session::new(dev.into(), name.into(), user.into());
+            SESSIONS.write().unwrap().insert(s.id.clone(), s.clone());
+            record_payment(&format!("tx-{dev}"), 1.0, &s);
+        }
+        let mut q = history_query(user);
+        q.device_id = Some("device-002".into());
+        let resp = get_payment_history(&q);
+        assert_eq!(resp.total_sessions, 1);
+        assert_eq!(resp.data[0].device_id, "device-002");
+    }
+
+    // ── QR scan analytics ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_qr_analytics_counts_scans() {
+        let req = crate::models::DeviceRegistrationRequest {
+            name: "QR Test Device".into(),
+            device_type: crate::models::DeviceType::Sensor,
+            description: "qr".into(),
+            price: 1.0,
+            location: "Lab".into(),
+            connectivity: "wifi".into(),
+            owner_address: format!("G{}", "C".repeat(55)),
+            latitude: None,
+            longitude: None,
+        };
+        let dev = crate::device_registry::register(req).unwrap();
+
+        record_qr_scan(&dev.id, Some("print".into())).unwrap();
+        record_qr_scan(&dev.id, None).unwrap();
+
+        let analytics = get_qr_analytics(&dev.id);
+        assert_eq!(analytics.total_scans, 2);
+        assert!(analytics.last_scan.is_some());
+        assert_eq!(analytics.daily.iter().map(|d| d.scans).sum::<u64>(), 2);
+
+        crate::device_registry::delete(&dev.id, Some(&dev.owner_address)).unwrap();
+    }
+
+    #[test]
+    fn test_qr_scan_unknown_device_errors() {
+        assert!(record_qr_scan("device-does-not-exist", None).is_err());
     }
 }

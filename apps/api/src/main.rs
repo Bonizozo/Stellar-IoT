@@ -1,5 +1,8 @@
 mod analytics;
+mod auth;
+mod auth_middleware;
 mod config;
+mod device_registry;
 mod handlers;
 mod models;
 mod routes;
@@ -18,12 +21,13 @@ use webhook_service::WebhookStore;
 async fn main() {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
 
     let store = WebhookStore::new();
 
     let app = Router::new()
+        .merge(routes::auth_routes())
         .merge(routes::device_routes())
         .merge(routes::payment_routes())
         .merge(routes::earnings_routes())
