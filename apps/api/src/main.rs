@@ -2,6 +2,7 @@ mod analytics;
 mod auth;
 mod auth_middleware;
 mod config;
+mod device_registry;
 mod handlers;
 mod models;
 mod routes;
@@ -20,7 +21,7 @@ use webhook_service::WebhookStore;
 async fn main() {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
 
     let store = WebhookStore::new();

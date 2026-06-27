@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { Search, MapPin, Wifi, Clock, Filter } from 'lucide-react';
+import { recordQrScan } from '@/services/api';
 
 interface Device {
   id: string;
@@ -20,6 +22,17 @@ const DevicesPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('All');
   const [loading, setLoading] = useState(true);
+
+  const params = useParams();
+  const searchParams = useSearchParams();
+
+  // Attribute the visit to the QR channel when arriving via a scanned card.
+  useEffect(() => {
+    const id = params?.id as string | undefined;
+    if (id && searchParams.get('src') === 'qr') {
+      recordQrScan(id, searchParams.get('source') ?? 'qr');
+    }
+  }, [params, searchParams]);
 
   // Mock data (replace with API call to apps/api later)
   useEffect(() => {
