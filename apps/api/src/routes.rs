@@ -1,12 +1,25 @@
+use crate::auth;
+use crate::auth_middleware::require_auth;
 use crate::handlers;
 use crate::webhook_handlers;
 use crate::webhook_service::WebhookStore;
 use axum::{
+    middleware,
     routing::{get, post, delete},
     Router,
 };
 
+pub fn auth_routes() -> Router {
+    Router::new()
+        .route("/auth/challenge", get(auth::get_challenge))
+        .route("/auth/verify", post(auth::verify_challenge))
+}
+
 pub fn device_routes() -> Router {
+    let protected = Router::new()
+        .route("/devices/:id/analytics", get(handlers::get_device_analytics))
+        .layer(middleware::from_fn(require_auth));
+
     Router::new()
         .route("/devices", get(handlers::get_devices))
         .route("/devices/search", get(handlers::search_devices))
@@ -17,7 +30,7 @@ pub fn device_routes() -> Router {
         .route("/session/:id", get(handlers::get_session).delete(handlers::end_session))
         .route("/session/:id/extend", post(handlers::extend_session))
         .route("/session/:id/telemetry", get(handlers::telemetry_ws))
-        .route("/devices/:id/analytics", get(handlers::get_device_analytics))
+        .merge(protected)
 }
 
 pub fn payment_routes() -> Router {

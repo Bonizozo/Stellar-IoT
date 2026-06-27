@@ -1,4 +1,6 @@
 mod analytics;
+mod auth;
+mod auth_middleware;
 mod config;
 mod handlers;
 mod models;
@@ -24,6 +26,7 @@ async fn main() {
     let store = WebhookStore::new();
 
     let app = Router::new()
+        .merge(routes::auth_routes())
         .merge(routes::device_routes())
         .merge(routes::payment_routes())
         .merge(routes::webhook_routes().with_state(store))
