@@ -33,3 +33,6 @@ Cargo.lock
 
 # Wasm
 *.wasm
+
+# OS/crash artifacts
+*.stackdump
